@@ -1,0 +1,122 @@
+### Environment configuration
+split: 'train' # data split; choices ['train', 'test']
+  
+accelerator: 'gpu'
+device: 'cuda' # device to use; choices ['cuda', 'cpu']
+
+seed: 999
+data_dir: 'path_to_data/HR_AVENUE'
+exp_dir: './checkpoints'
+
+num_coords: 2
+create_experiment_dir: True
+test_path: 'path_to_data/HR_AVENUE/testing'
+load_ckpt: ''
+validation: True # use validation
+
+###################################################################################################################
+
+debug: False
+devices: [1] # indices of cuda devices to use
+dir_name: 'exp_name'
+rec_weight: 1
+ae: True
+
+# Motion-Condition settings (inject achieved the best results)
+inject_condition: True
+concat_condition: False
+no_condition: False
+interleave : True
+
+indices: [0,1,2] # indexes to be used as condition. Don't pass -1, pass the actual last index instead 
+num_random_indices: 0
+
+noise_steps: 10 # how many diffusion steps to perform
+
+channels: [32,16,32] # channels for the encoder
+h_dim: 32 # dimension of the bottleneck at the end of the encoder
+latent_dim: 16 # dimension of the latent space
+emb_dim: 16 # use latent_dim
+load_tensors: False 
+
+####################################################################################################################
+### Model's configuration
+use_decoder: False
+use_vae: False
+use_ema: False
+
+
+diffusion: True
+
+
+
+use_hr: False # just for test
+
+pretrained: False
+dropout: 0 # probability of dropout
+conv_oper: 'sagc'
+act: 'relu' # activation function
+pad_size: 10 # size of the padding 
+
+projector: 'mlp' # choices ['linear', 'mlp']
+
+
+
+
+### Hyperparameters for the losses
+alpha: 0.000001 # weight of the regularisation term
+lambda_: 0.01 # weight of the reconstruction loss
+
+
+### Dataset's configuration
+dataset_path_to_robust: 'path_to_data/morais/STC'
+dataset_headless: False
+dataset_choice: 'HR-Avenue'
+dataset_seg_len: 6 #cond+noised #was 8 
+
+true_every: 7 ####Interleaving : (data_seg_len-1)%true_every == 0 # ignored if indices != [] #deprecated use dataset_seg_len and indices instead
+
+dataset_seg_stride: 1
+dataset_start_offset: 0
+dataset_num_transform: 5
+dataset_symm_range: True
+dataset_return_indices: False
+dataset_sub_mean: False
+dataset_vid_res: [640,360]
+dataset_normalize_pose: True
+dataset_kp18_format: False
+dataset_batch_size: 1024
+dataset_hip_center: False
+dataset_num_workers: 8
+dataset_normalization_strategy: 'robust' # use 'none' to avoid normalization, 'robust' otherwise
+dataset_use_fitted_scaler: False
+dataset_kp_th: 0
+dataset_seg_th: 0
+dataset_double_item: False
+
+
+### ae args
+ae_act: 'relu'
+ae_fn: ''
+ae_test_every: 20
+ae_epochs: 100
+
+
+### Optimizer and scheduler's configuration
+opt_optimizer: 'adam'
+opt_scheduler: 'tri'
+opt_lr: 0.001
+opt_lr_decay: 0.99
+opt_weight_decay: 0.00001
+
+
+### WANDB configuration
+use_wandb: True
+project_name: "project_name"
+wandb_entity: "entity_name"
+group_name: "group_name"
+
+
+### Post-processing configuration
+smoothing: 50
+
