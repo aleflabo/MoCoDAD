@@ -1,99 +1,174 @@
-import torch.nn as nn
+from collections import OrderedDict
+from typing import List, Tuple, Dict
 
+import torch
+from torch import Tensor
+import torch.nn as nn
 from models.gcae import stsgcn_diffusion_unet as stsgcn
 
-import pdb
+
 
 class Encoder(nn.Module):
-    def __init__(self, c_in, h_dim, n_frames, n_joints, dropout, channels) -> None:
+    
+    def __init__(self, input_dim:int, layer_channels:List[int], hidden_dimension:int, 
+                 n_frames:int, n_joints:int, dropout:float,
+                 bias=True) -> None:
+        """
+        Class that implements a Space-Time-Separable Graph Convolutional Encoder (STS-GCN).
+
+        Args:
+            input_dim (int): number of coordinates of the input
+            layer_channels (List[int]): list of channel dimension for each layer
+            hidden_dimension (int): dimension of the hidden layer
+            n_frames (int): number of frames of the input pose sequence
+            n_joints (int): number of joints of the input pose sequence
+            dropout (float): dropout probability
+            bias (bool, optional): whether to use bias in the convolutional layers. Defaults to True.
+        """
+        
         super().__init__()
         
-        self.model = nn.ModuleList()
+        # Set the model's parameters
+        self.input_dim = input_dim
+        self.layer_channels = layer_channels
+        self.hidden_dimension = hidden_dimension
+        self.n_frames = n_frames
+        self.n_joints = n_joints
+        self.dropout = dropout
+        self.bias = bias
         
-        in_ch = c_in
+        # Build the model
+        self.model_layers = self.build_model()
+        
 
-        # for channel in channels:
-        #     self.model.append(stsgcn.ST_GCNN_layer(in_ch,channel,[1,1],1,n_frames,
-        #                                            n_joints,dropout))
-        #     in_ch = channel
+    def build_model(self) -> nn.ModuleList:
+        """
+        Build the model.
+
+        Returns:
+            nn.ModuleList: list of the model's layers
+        """
         
-        self.enc_1 = stsgcn.ST_GCNN_layer(in_ch,channels[0],[1,1],1,n_frames,
-                                                   n_joints,dropout)
-        in_ch = channels[0]
-        self.enc_2 = stsgcn.ST_GCNN_layer(in_ch,channels[1],[1,1],1,n_frames,
-                                                   n_joints,dropout)
-        in_ch = channels[1]
-        self.enc_3 = stsgcn.ST_GCNN_layer(in_ch,channels[2],[1,1],1,n_frames,
-                                                   n_joints,dropout)
-        in_ch = channels[2]
-            
-        self.enc_4 = stsgcn.ST_GCNN_layer(in_ch,h_dim,[1,1],1,n_frames,
-                                               n_joints,dropout)
+        input_channels = self.input_dim
+        layer_channels = self.layer_channels + [self.hidden_dimension]
+        kernel_size = [1,1]
+        stride = 1
+        model_layers = nn.ModuleList()
+        for channels in layer_channels:
+            model_layers.append(
+                stsgcn.ST_GCNN_layer(in_channels=input_channels, 
+                                     out_channels=channels,
+                                     kernel_size=kernel_size,
+                                     stride=stride,
+                                     time_dim=self.n_frames,
+                                     joints_dim=self.n_joints,
+                                     dropout=self.dropout,
+                                     bias=self.bias))
+            input_channels = channels
+        return model_layers
         
-        # self.model = nn.Sequential(*self.model)
         
-    def forward(self, x, t):
-        '''
-        input shape: [BatchSize, in_Channels, n_frames, n_joints]
-        output shape: [BatchSize, h_dim, n_frames, n_joints]
-        '''
-        res_0 = x
-        res_1 = self.enc_1(x,t)
-        res_2 = self.enc_2(res_1,t)
-        res_3 = self.enc_3(res_2,t)
-        x = self.enc_4(res_3,t)
+    def forward(self, X:torch.Tensor, t:torch.Tensor) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        """
+        Forward pass of the model.
+
+        Args:
+            X (torch.Tensor): input tensor of shape [batch_size, input_channels, n_frames, n_joints]
+            t (torch.Tensor): time tensor of shape [batch_size, n_frames]
+
+        Returns:
+            torch.Tensor: output tensor of shape [batch_size, hidden_dimension, n_frames, n_joints]
+            List[torch.Tensor]: list of the output tensors of each intermediate layer
+        """
         
-        return x, [res_0, res_1, res_2, res_3]    
+        layers_out = [X]
+        for layer in self.model_layers:
+            out_X = layer(layers_out[-1], t)
+            layers_out.append(out_X)
+        
+        return layers_out[-1], layers_out[:-1]
+    
     
     
 class Decoder(nn.Module):
-    def __init__(self, c_out, h_dim, n_frames, n_joints, dropout, channels) -> None:
+    
+    def __init__(self, output_dim:int, layer_channels:List[int], hidden_dimension:int, 
+                 n_frames:int, n_joints:int, dropout:float,
+                 bias=True) -> None:
+        """
+        Class that implements a Space-Time-Separable Graph Convolutional Decoder (STS-GCN).
+
+        Args:
+            output_dim (int): number of coordinates of the output
+            layer_channels (List[int]): list of channel dimension for each layer (in the same order as the encoder's layers)
+            hidden_dimension (int): dimension of the hidden layer
+            n_frames (int): number of frames of the input pose sequence
+            n_joints (int): number of joints of the input pose sequence
+            dropout (float): dropout probability
+            bias (bool, optional): whether to use bias in the convolutional layers. Defaults to True.
+        """
+        
         super().__init__()
         
-        self.model = nn.ModuleList()
+        # Set the model's parameters
+        self.output_dim = output_dim
+        self.layer_channels = layer_channels[::-1]
+        self.hidden_dimension = hidden_dimension
+        self.n_frames = n_frames
+        self.n_joints = n_joints
+        self.dropout = dropout
+        self.bias = bias
         
-        in_ch = h_dim
-
-        # for channel in channels:
-        #     self.model.append(stsgcn.ST_GCNN_layer(in_ch,channel,[1,1],1,n_frames,
-        #                                            n_joints,dropout))
-        #     in_ch = channel
-            
-            
-        self.dec_1 = stsgcn.ST_GCNN_layer(in_ch,channels[2],[1,1],1,n_frames,
-                                                   n_joints,dropout)
-        in_ch = channels[2]
-        self.dec_2 = stsgcn.ST_GCNN_layer(in_ch,channels[1],[1,1],1,n_frames,
-                                                   n_joints,dropout)
-        in_ch = channels[1]
-        self.dec_3 = stsgcn.ST_GCNN_layer(in_ch,channels[0],[1,1],1,n_frames,
-                                                   n_joints,dropout)
-        in_ch = channels[0]
-            
-        self.dec_4 = stsgcn.ST_GCNN_layer(in_ch,c_out,[1,1],1,n_frames,
-                                               n_joints,dropout)
-            
-            
-        # self.out = nn.Linear(n_frames, int(n_frames/2))
-        self.out = nn.Linear(n_frames, n_frames)
-        # self.out = nn.Linear(n_frames, 3)
-        # self.model.append(stsgcn.ST_GCNN_layer(in_ch,c_out,[1,1],1,n_frames,
-        #                                        n_joints,dropout)) 
+        # Build the model
+        self.model_layers, self.out = self.build_model()
         
-        # self.model = nn.Sequential(*self.model)
-         
+    
+    def build_model(self) -> Tuple[nn.ModuleList, nn.Linear]:
+        """
+        Build the model.
 
-    def forward(self, x, t, res):
-        '''
-        input shape: [BatchSize, h_dim, n_frames, n_joints]
-        output shape: [BatchSize, in_Channels, n_frames, n_joints]
-        '''
+        Returns:
+            nn.ModuleList: list of the model's layers
+            nn.Linear: output layer
+        """
         
-        x = self.dec_1(x,t)+res[3]
-        x = self.dec_2(x,t)+res[2]
-        x = self.dec_3(x,t)+res[1]
-        x = self.dec_4(x,t)+res[0]
+        input_channels = self.hidden_dimension
+        layer_channels = self.layer_channels + [self.output_dim]
+        kernel_size = [1,1]
+        stride = 1
+        model_layers = nn.ModuleList()
+        for channels in layer_channels:
+            model_layers.append(
+                stsgcn.ST_GCNN_layer(in_channels=input_channels, 
+                                     out_channels=channels,
+                                     kernel_size=kernel_size,
+                                     stride=stride,
+                                     time_dim=self.n_frames,
+                                     joints_dim=self.n_joints,
+                                     dropout=self.dropout,
+                                     bias=self.bias))
+            input_channels = channels
+        output_layer = nn.Linear(self.n_frames, self.n_frames)
+        return model_layers, output_layer
+        
 
-        x = self.out(x.permute(0, 1, 3, 2)).permute(0, 1, 3, 2)
+    def forward(self, X:torch.Tensor, t:torch.Tensor, residuals:List[torch.Tensor]) -> torch.Tensor:
+        """
+        Forward pass of the model.
 
-        return x
+        Args:
+            X (torch.Tensor): input tensor of shape [batch_size, hidden_dimension, n_frames, n_joints]
+            t (torch.Tensor): time tensor of shape [batch_size, n_frames]
+            residuals (List[torch.Tensor]): list of the output tensors of each intermediate layer
+
+        Returns:
+            torch.Tensor: output tensor of shape [batch_size, output_dim, n_frames, n_joints]
+        """
+        
+        for layer in self.model_layers:
+            out_X = layer(X, t)
+            X = out_X + residuals.pop()
+
+        X = self.out(X.permute(0, 1, 3, 2)).permute(0, 1, 3, 2)
+
+        return X

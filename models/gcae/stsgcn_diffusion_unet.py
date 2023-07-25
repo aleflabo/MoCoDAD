@@ -86,14 +86,14 @@ class ST_GCNN_layer(nn.Module):
                  time_dim,
                  joints_dim,
                  dropout,
-                 bias=True, emb_dim=256):
+                 bias=True, 
+                 emb_dim=256):
         
         super(ST_GCNN_layer,self).__init__()
         self.kernel_size = kernel_size
         assert self.kernel_size[0] % 2 == 1
         assert self.kernel_size[1] % 2 == 1
         padding = ((self.kernel_size[0] - 1) // 2,(self.kernel_size[1] - 1) // 2)
-        
         
         self.gcn=ConvTemporalGraphical(time_dim,joints_dim) # the convolution layer
         
@@ -104,22 +104,21 @@ class ST_GCNN_layer(nn.Module):
                 (self.kernel_size[0], self.kernel_size[1]),
                 (stride, stride),
                 padding,
+                bias=bias
             ),
             nn.BatchNorm2d(out_channels),
             nn.Dropout(dropout, inplace=True),
         )
-      
         
         if stride != 1 or in_channels != out_channels: 
 
-            self.residual=nn.Sequential(nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    kernel_size=1,
-                    stride=(1, 1)),
-                nn.BatchNorm2d(out_channels),
-            )
-            
+            self.residual = nn.Sequential(
+                            nn.Conv2d(in_channels,
+                                      out_channels,
+                                      kernel_size=1,
+                                      stride=(1, 1),
+                                      bias=bias),
+                            nn.BatchNorm2d(out_channels))   
             
         else:
             self.residual=nn.Identity()
@@ -141,7 +140,6 @@ class ST_GCNN_layer(nn.Module):
         
 
     def forward(self, x, t=None):
-     #   assert A.shape[0] == self.kernel_size[1], print(A.shape[0],self.kernel_size)
         res=self.residual(x)
         x=self.gcn(x) 
         x=self.tcn(x)
@@ -187,9 +185,6 @@ class CNN_layer(nn.Module): # This is the simple CNN layer,that performs a 2-D c
         
         output= self.block(x)
         return output
-
-
-# In[11]:
 
 
 class Model(nn.Module):
