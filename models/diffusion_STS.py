@@ -1,23 +1,22 @@
-
 import os
-
+from typing import Dict, List, Tuple, Union
+import argparse
+from math import prod
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from models.stsae.stsae_unet import STSAE_Unet, STSE_Unet
+from models.stsae.stsae import STSAE, STSE
 from sklearn.metrics import roc_auc_score
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from utils.eval_utils import (pad_scores, filter_vectors_by_cond, score_process,
-                              compute_var_matrix)
-from utils.model_utils import processing_data
-from typing import Dict, List, Tuple, Union
-
-from models.stsae.stsae_diffusion_unet import STSAE, STSENC
-from models.stsae.stsae_hidden_hypersphere import STSAE as STSAE_enc
 from utils.diffusion_utils import Diffusion
+from utils.eval_utils import (compute_var_matrix, filter_vectors_by_cond,
+                              pad_scores, score_process)
+from utils.model_utils import processing_data
 
 V_01 = [1] * 75 + [0] * 46 + [1] * 269 + [0] * 47 + [1] * 427 + [0] * 47 + [1] * 20 + [0] * 70 + [1] * 438  # 1439 Frames
 V_02 = [1] * 272 + [0] * 48 + [1] * 403 + [0] * 41 + [1] * 447  # 1211 Frames
@@ -40,31 +39,117 @@ masked_clips = {
 
 
 
-class LitAutoEncoder(pl.LightningModule):
-    def __init__(self, 
-                 args,
-                 ):
-        super().__init__()
-        self.save_hyperparameters()
+class MoCoDAD(pl.LightningModule):
+    
+    losses = {'l1':nn.L1Loss, 'smooth_l1':nn.SmoothL1Loss, 'l2':nn.MSELoss}
+    conditioning_strategies = {'cat':'concat', 'concat':'concat', 
+                               'add2layers':'inject', 'inject':'inject', 
+                               'inbetween_imp':'interleave', 'interleave':'interleave',  
+                               'random_indices':'random_imp', 'random_imp':'random_imp', 
+                               'no_condition':'no_condition', 'none':'no_condition'}
+
+    def __init__(self, args:argparse.Namespace) -> None:
+        """
+        This class implements MoCoDAD model.
         
-        self.args = args 
-        self.learning_rate = args.opt_lr
+        Args:
+            args (argparse.Namespace): arguments containing the hyperparameters of the model
+        """
+        
+        super(MoCoDAD, self).__init__()
+
+        # Log the hyperparameters of the model
+        self.save_hyperparameters(args)
+        
+        # Set the internal variables of the model
+        # Data parameters
         self.batch_size = args.dataset_batch_size
-        channels = args.channels
-        self.lambda_ = args.lambda_ # weight of the reconstruction loss
-        self.device_ = args.device
-        self.noise_steps = args.noise_steps
-        self.emb_dim = args.emb_dim
-        
-        
-        self.seq_len = args.dataset_seg_len
-        self.true_every = args.true_every
-        self.interleave = args.interleave
-        self.num_random_indices = args.num_random_indices
-        self.l1 = torch.nn.SmoothL1Loss(reduction='none')
-        self.val_loss = 0 
+        self.n_frames = args.dataset_seg_len
         self.num_coords = args.num_coords
+        self.n_joints = self._infer_number_of_joint(args)
         
+        # Model parameters
+        # Main network
+        self.device_ = args.device
+        self.embedding_dim = args.embedding_dim 
+        self.dropout = args.dropout
+        self.conditioning_strategy = self.conditioning_strategies[args.conditioning_strategy]
+        self.conditioning_indices = args.conditioning_indices
+        self.n_frames_condition, self.n_frames_corrupt = self._set_conditioning_strategy()        
+        # Conditioning network
+        self.conditioning_architecture = args.conditioning_architecture
+        self.cond_h_dim = args.h_dim
+        self.cond_latent_dim = args.latent_dim
+        self.cond_channels = args.channels
+        self.cond_dropout = args.dropout
+        
+        # Training and inference parameters
+        self.learning_rate = args.opt_lr
+        self.loss_fn = self.losses[args.loss_fn](reduction='none')
+        self.lambda_ = args.lambda_ # weight of the reconstruction loss
+        self.noise_steps = args.noise_steps
+        self.aggregation_strategy = args.aggregation_strategy
+        self.n_generated_samples = args.n_generated_samples
+        self.model_return_value = args.model_return_value
+        self.val_loss = 0 
+        
+        # Set the noise scheduler for the diffusion process
+        self._set_diffusion_variables()
+        
+        # Build the model
+        self.build_model()
+        
+    
+    def build_model(self) -> None:
+        
+        if self.conditioning_strategy == 'inject':
+            if self.conditioning_architecture == 'AE':
+                condition_encoder = STSAE(c_in=self.num_coords, h_dim=self.cond_h_dim, 
+                                          latent_dim=self.cond_latent_dim, n_frames=self.n_frames_condition, 
+                                          dropout=self.cond_dropout, n_joints=self.n_joints, 
+                                          layer_channels=self.cond_channels, device=self.device_)
+            elif self.conditioning_architecture == 'E':
+                condition_encoder = STSE(c_in=self.num_coords, h_dim=self.cond_h_dim, 
+                                         latent_dim=self.cond_latent_dim, n_frames=self.n_frames_condition, 
+                                         dropout=self.cond_dropout, n_joints=self.n_joints, 
+                                         layer_channels=self.cond_channels, device=self.device_)
+            elif self.conditioning_architecture == 'E_unet':
+                condition_encoder = STSE_Unet(c_in=self.num_coords, embedding_dim=self.embedding_dim,
+                                              latent_dim=self.cond_latent_dim, n_frames=self.n_frames_condition,
+                                              n_joints=self.n_joints, dropout=self.cond_dropout,
+                                              unet_down_channels=self.cond_channels, device=self.device_, set_out_layer=True)
+            else:
+                raise NotImplementedError(f'Conditioning architecture {self.conditioning_architecture} not implemented.')
+        else:
+            condition_encoder = None
+            
+        model = STSAE_Unet(c_in=self.num_coords, embedding_dim=self.embedding_dim, 
+                           n_frames=self.n_frames_corrupt, dropout=self.dropout, 
+                           n_joints=self.n_joints, device=self.device_,
+                           concat_condition=(self.conditioning_strategy == 'concat'), 
+                           inject_condition=(self.conditioning_strategy == 'inject'))
+        
+        self.condition_encoder, self.model = condition_encoder, model
+        
+    
+    def _set_diffusion_variables(self) -> None:
+        self.noise_scheduler = Diffusion(noise_steps=self.noise_steps, n_joints=self.n_joints,
+                                         device=self.device_, time=self.n_frames)
+        self.beta = self.noise_scheduler.schedule_noise().to(self.device_)
+        self.alpha = (1. - self.beta).to(self.device_)
+        self.alpha_hat = torch.cumprod(self.alpha, dim=0).to(self.device_)
+        
+    
+    def _infer_number_of_joint(self, args:argparse.Namespace) -> int:
+        """
+        Infer the number of joints based on the dataset parameters.
+
+        Args:
+            args (argparse.Namespace): arguments containing the hyperparameters of the model
+
+        Returns:
+            int: number of joints
+        """
         
         if args.dataset_headless:
             joints_to_consider = 14
@@ -72,277 +157,228 @@ class LitAutoEncoder(pl.LightningModule):
             joints_to_consider = 18
         else:
             joints_to_consider = 17
-        self.num_joints = joints_to_consider
-        self.diffusion = Diffusion(noise_steps=self.noise_steps, n_joints=joints_to_consider, channels=channels,
-                                   device=self.device_, time=args.dataset_seg_len)
-        
-        # condition information
-        self.concat_condition = args.concat_condition
-        self.inject_condition = args.inject_condition
-        self.no_condition = args.no_condition
-
-        if self.concat_condition:
-            n_frames_cond = args.dataset_seg_len
-            n_frames_to_be_noised = n_frames_cond
-        elif self.no_condition:
+        return joints_to_consider
+    
+    
+    def _set_conditioning_strategy(self) -> Tuple[int]:
+        if self.conditioning_strategy == 'no_condition':
             n_frames_cond = 0
-            n_frames_to_be_noised = self.seq_len
-        elif self.interleave:
-            if self.num_random_indices>0:
-                n_frames_cond = self.num_random_indices
+        elif self.conditioning_strategy == 'concat' or self.conditioning_strategy == 'inject':
+            if isinstance(self.conditioning_indices, int):
+                n_frames_cond = self.n_frames // self.conditioning_indices
             else:
-                n_frames_cond = len(self.args.indices)
-            n_frames_to_be_noised = self.seq_len - n_frames_cond
-            print('n_frames_cond', n_frames_cond)
-        else:
-            n_frames_cond = args.dataset_seg_len//2
-            
-        if self.inject_condition:
-            if self.args.ae:
-                self.condition_encoder = STSAE_enc(c_in=args.num_coords, h_dim=args.h_dim, latent_dim=args.latent_dim, 
-                                   n_frames=int(n_frames_cond), 
-                                   dropout=args.dropout, n_joints=joints_to_consider, channels=channels, emb_dim=self.emb_dim,  device=self.device_)
+                n_frames_cond = len(self.conditioning_indices)
+                assert self.conditioning_indices == list(range(min(self.conditioning_indices), max(self.conditioning_indices)+1)), \
+                    'Conditioning indices must be a list of consecutive integers'
+                assert (min(self.conditioning_indices) == 0) or (max(self.conditioning_indices) == (self.n_frames-1)), \
+                    'Conditioning indices must start from 0 or end at the last frame'
+        elif self.conditioning_strategy == 'interleave' or self.conditioning_strategy == 'random_imp':
+            if isinstance(self.conditioning_indices, int):
+                n_frames_cond = self.conditioning_indices
             else:
-                self.condition_encoder = STSENC(c_in=args.num_coords, h_dim=args.h_dim, latent_dim=args.latent_dim, 
-                            n_frames=n_frames_cond, dropout=args.dropout, 
-                            n_joints=joints_to_consider, device=self.device_, channels=channels, emb_dim=self.emb_dim)
+                n_frames_cond = len(self.conditioning_indices)
+                assert self.conditioning_strategy != 'random_imp', \
+                    'Random imputation requires an integer number of frames to condition on, not a list of indices'
         else:
-            self.condition_encoder = None
-            
-            
-        self.model = STSAE(c_in=args.num_coords, h_dim=args.h_dim, latent_dim=args.latent_dim, 
-                           n_frames=n_frames_to_be_noised, dropout=args.dropout, 
-                           n_joints=joints_to_consider, device=self.device_, channels=channels,
-                           concat_condition=self.concat_condition, inject_condition=self.inject_condition, emb_dim=self.emb_dim)
+            raise NotImplementedError(f'Conditioning strategy {self.conditioning_strategy} not implemented')
         
-            
+        n_frames_to_corrupt = self.n_frames - n_frames_cond
+        return n_frames_cond, n_frames_to_corrupt
+    
+    
+    def _pos_encoding(self, t, channels):
+        return self.model.pos_encoding(t, channels)
+    
+    
+    def _encode_condition(self, condition_data:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        if self.condition_encoder is None:
+            return None, None
         
-        
-    def forward(self, x:List[torch.tensor]) -> Tuple[torch.tensor]:
-        # implement diffusion process used at evaluation time
-        
-        pst = None
-        condition_data = None
-        tensor_data = x[0]
-        
-        if self.interleave:
-            condition_data, to_be_noised_data, indices = self.interleave_fn(tensor_data)
-            if self.args.ae:
-                if self.num_random_indices>0:
-                    recons , condition_data = self.condition_encoder(condition_data,indices=indices[0].to(self.device))
-                else:
-                    recons, condition_data = self.condition_encoder(condition_data)                
-            else:
-                condition_data, _ = self.condition_encoder(condition_data, None, None)
-        
-        elif self.no_condition:
-            to_be_noised_data = tensor_data
-            
-        else:
-            if self.concat_condition:
-                pst = tensor_data[:,:,:self.seq_len//2,:]
-            if self.inject_condition:
-                if self.args.ae:
-                    recons, condition_data = self.condition_encoder(tensor_data[:,:,:self.args.dataset_seg_len//2,:])
-                else:
-                    condition_data, _ = self.condition_encoder(tensor_data[:,:,:self.seq_len//2,:], None, None)  
-        
-            to_be_noised_data = tensor_data[:,:,self.seq_len//2:,:]
-
+        return self.condition_encoder(condition_data, t=None)
+    
+    
+    def _unpack_data(self, x:torch.Tensor) -> List[torch.Tensor]:
+        tensor_data = x[0].to(self.device_)
         transformation_idx = x[1]
         metadata = x[2]
         actual_frames = x[3]
+        meta_out = [transformation_idx, metadata, actual_frames]
+        return tensor_data, meta_out
+    
+    
+    def _pack_out_data(self, selected_x:torch.Tensor, loss_of_selected_x:torch.Tensor, meta_out:List[torch.Tensor], return_:str) -> torch.Tensor:
         
+        if return_ is None:
+            if self.model_return_value is None:
+                raise ValueError('Either return_ or self.model_return_value must be set')
+            else:
+                return_ = self.model_return_value
+
+        if return_ == 'pose':
+            out = [selected_x]
+        elif return_ == 'loss':
+            out = [loss_of_selected_x]
+        elif return_ == 'all':
+            out = [selected_x, loss_of_selected_x]
+            
+        return out + meta_out
+    
+    
+    def _cut_array_from_indices(self, x:torch.Tensor, indices:torch.Tensor) -> Tuple[torch.Tensor]:
+    
+        mask = indices < self.conditioning_indices
+        indices_ = indices[mask].reshape(-1, self.conditioning_indices)
+        not_indices = indices[~mask].reshape(-1, self.n_frames-self.conditioning_indices)
+        mask = mask[:,None,None,:].expand(-1, self.num_coords, self.n_joints, -1)
+        container = x[mask].reshape(-1, self.num_coords, self.n_joints, self.conditioning_indices)
+        not_container = x[~mask].reshape(-1, self.num_coords, self.n_joints, self.n_frames-self.conditioning_indices)
         
-        self.beta = self.diffusion.my_schedule_noise().to(self.device_)
-        self.alpha = (1. - self.beta).to(self.device_)
-        self.alpha_hat = torch.cumprod(self.alpha, dim=0).to(self.device_)
-        accumulate = []
-        losses = []
+        return container, not_container, indices_, not_indices
+    
+    
+    def _select_frames(self, data:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor]]:
         
-        mode = 'best'
-        if mode == 'best':
-            actual_loss = (torch.ones(to_be_noised_data.shape[0])*1e10).to(self.device_)
+        if self.conditioning_strategy == 'random_imp':
+
+            indices = torch.tensor([torch.randperm(self.n_frames).tolist() for _ in range(data.shape[0])], device=self.device_)
+            cond_data, corrupt_data, cond_idxs, corrupt_idxs = self._cut_array_from_indices(data.permute((0,1,3,2)), indices)
+            cond_data = cond_data.permute((0,1,3,2))
+            corrupt_data = corrupt_data.permute((0,1,3,2))
+        
+        elif self.conditioning_strategy == 'no_condition':
+            cond_data, cond_idxs = None, None
+            corrupt_data, corrupt_idxs = data, torch.arange(self.n_frames, device=self.device_)
+            
+        elif len(self.conditioning_indices) == 0:
+            if self.conditioning_strategy == 'interleave': 
+                cond_idxs = torch.arange(start=0, end=self.n_frames, step=self.conditioning_indices, device=self.device_)
+                corrupt_idxs = torch.arange(start=1, end=self.n_frames, step=self.conditioning_indices, device=self.device_)
+            else:
+                cond_idxs = torch.arange(start=0, end=self.n_frames//self.conditioning_indices, device=self.device_)
+                corrupt_idxs = torch.arange(start=self.n_frames//self.conditioning_indices, end=self.n_frames, device=self.device_)
+            cond_data = torch.index_select(data, 2, cond_idxs)
+            corrupt_data = torch.index_select(data, 2, corrupt_idxs)
+            
         else:
-            actual_loss = (torch.zeros(to_be_noised_data.shape[0])).to(self.device_)
-        actual_x = torch.zeros((to_be_noised_data.shape[0], to_be_noised_data.shape[1], to_be_noised_data.shape[2], to_be_noised_data.shape[3])).to(self.device_)
+            cond_idxs = torch.tensor(self.conditioning_indices, device=self.device_)
+            corrupt_idxs = torch.tensor([i for i in range(self.n_frames) if i not in self.conditioning_indices], device=self.device_)
+            cond_data = torch.index_select(data, 2, cond_idxs)
+            corrupt_data = torch.index_select(data, 2, corrupt_idxs) 
+
+        return cond_data, corrupt_data, [cond_idxs, corrupt_idxs]
+    
+    
+    def _unet_forward(self, corrupt_data:torch.Tensor, t:torch.Tensor=None, condition_data:torch.Tensor=None, 
+                      *, corrupt_idxs:torch.Tensor) -> torch.Tensor:
         
-        n_gen = 50
-        for _ in range(n_gen):
+        prediction, _ = self.model(corrupt_data, t, condition_data=condition_data)
+        
+        if self.conditioning_strategy != 'inject':
+            prediction = prediction[:, corrupt_idxs]
+        
+        return prediction 
+    
+    
+    def _aggregation_strategy(self, generated_xs:List[torch.Tensor], input_sequence:torch.Tensor, aggr_strategy:str):
+        aggr_strategy = self.aggregation_strategy if aggr_strategy is None else aggr_strategy 
+        if aggr_strategy == 'random':
+            return generated_xs[np.random.randint(len(generated_xs))]
+        
+        B, repr_shape = input_sequence.shape[0], input_sequence.shape[1:]
+        compute_loss = lambda x: torch.mean(self.loss_fn(x, input_sequence).reshape(-1, prod(repr_shape)), dim=-1)
+        losses = [compute_loss(x) for x in generated_xs]
 
-            # generate inital random noise based on the condition type
-            if self.interleave:
-                x = torch.randn((to_be_noised_data.shape[0], to_be_noised_data.shape[1], to_be_noised_data.shape[2], to_be_noised_data.shape[3])).to(self.device_)
-            elif self.concat_condition:
-                x = torch.randn((tensor_data.shape[0], tensor_data.shape[1], self.seq_len//2, tensor_data.shape[3])).to(self.device_)
-            else:    
-                x = torch.randn((tensor_data.shape[0], tensor_data.shape[1], self.seq_len, tensor_data.shape[3])).to(self.device_)
+        if aggr_strategy == 'all':
+            dims_idxs = list(range(2, len(repr_shape)+2))
+            dims_idxs = [1,0] + dims_idxs
+            selected_x = torch.stack(generated_xs).permute(*dims_idxs)
+            loss_of_selected_x = torch.stack(losses).permute(1,0)
+        elif aggr_strategy == 'mean':
+            selected_x = None
+            loss_of_selected_x = torch.mean(torch.stack(losses), dim=0)
+        elif aggr_strategy == 'mean_pose':
+            selected_x = torch.mean(torch.stack(generated_xs), dim=0)
+            loss_of_selected_x = compute_loss(selected_x)
+        elif aggr_strategy == 'median':
+            loss_of_selected_x, _ = torch.median(torch.stack(losses), dim=0)
+            selected_x = None
+        elif aggr_strategy == 'median_pose':
+            selected_x, _ = torch.median(torch.stack(generated_xs), dim=0)
+            loss_of_selected_x = compute_loss(selected_x)
+        elif aggr_strategy == 'best' or aggr_strategy == 'worst':
+            strategy = (lambda x,y: x < y) if aggr_strategy == 'best' else (lambda x,y: x > y)
+            loss_of_selected_x = torch.full((B,), fill_value=(1e10 if aggr_strategy == 'best' else -1.), device=self.device_)
+            selected_x = torch.zeros((B, *repr_shape)).to(self.device)
 
+            for i in range(len(generated_xs)):
+                mask = strategy(losses[i], loss_of_selected_x)
+                loss_of_selected_x[mask] = losses[i][mask]
+                selected_x[mask] = generated_xs[i][mask]
+        else:
+            raise ValueError(f'Unknown aggregation strategy {aggr_strategy}')
+        
+        return selected_x, loss_of_selected_x
+    
+        
+    def forward(self, input_data:List[torch.Tensor], condition_data:torch.Tensor=None, aggr_strategy:str=None, return_:str=None) -> List[torch.Tensor]:
+        
+        # Unpack data: tensor_data is the input data, meta_out is a list of metadata
+        tensor_data, meta_out = self._unpack_data(input_data)
+        B = tensor_data.shape[0]
+        # Select frames to condition on and to corrupt according to the conditioning strategy
+        condition_data, corrupt_data, idxs = self._select_frames(tensor_data)
+        # Encode the condition data
+        condition_embedding, _ = self._encode_condition(condition_data)
+
+        generated_xs = []
+        for _ in range(self.n_generated_samples):
+            # Generate gaussian noise of the same shape as the corrupt_data
+            x = torch.randn_like(corrupt_data, device=self.device_)
             for i in reversed(range(1, self.noise_steps)):
-                # reverse diffusion process
                 
-                t = (torch.ones(to_be_noised_data.shape[0]) * i).long().to(self.device_)
-                
-                predicted_noise, hidden_out = self.model(x, t, pst=pst, condition_data=condition_data)
-                
-                if self.concat_condition:
-                    predicted_noise = predicted_noise[:, :, self.seq_len//2:, :]
-                    
+                # Set the time step
+                t = torch.full(size=(B,), fill_value=i, dtype=torch.long, device=self.device_)
+                # Predict the noise
+                predicted_noise = self._unet_forward(x, t=t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
+                # Get the alpha and beta values and expand them to the shape of the predicted noise
                 alpha = self.alpha[t][:, None, None, None]
                 alpha_hat = self.alpha_hat[t][:, None, None, None]
                 beta = self.beta[t][:, None, None, None]
-                if i > 1:
-                    noise = torch.randn_like(x)
-                else:
-                    noise = torch.zeros_like(x)
-
+                # Generate gaussian noise of the same shape as the predicted noise
+                noise = torch.randn_like(x, device=self.device_) if i > 1 else torch.zeros_like(x, device=self.device_)
+                # Recover the predicted sequence
                 x = (1 / torch.sqrt(alpha) ) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
-
-            # calculate loss between ground truth and generated data
-            loss_fn=nn.SmoothL1Loss(reduction="none")
-            w, dim, timesteps, joints = x.shape
-            xs = x.cpu().numpy().transpose(0, 2, 3, 1).reshape(-1, timesteps*joints*dim)
-            to_be_noised_datas = to_be_noised_data.cpu().numpy().transpose(0, 2, 3, 1).reshape(-1, timesteps*joints*dim)
-            loss = loss_fn(torch.from_numpy(xs).to(self.device_),torch.from_numpy(to_be_noised_datas).to(self.device_) )
-            loss = torch.mean(loss,dim=-1)
+            # Append the generated sequence to the list of generated sequences
+            generated_xs.append(x)
             
-            # based on the selected mode, save the best or worst generated data
-            if mode == 'best':
-                mask = actual_loss > loss
-            else:
-                mask = actual_loss < loss
-            actual_loss[mask] = loss[mask]
-            actual_x[mask] = x[mask]
-
-            accumulate.append(x)
-            losses.append(loss.unsqueeze(-1))
-
-            
-        if self.concat_condition:
-            tensor_data = pst
+        selected_x, loss_of_selected_x = self._aggregation_strategy(generated_xs, corrupt_data, aggr_strategy)
         
-        return actual_loss, tensor_data, transformation_idx, metadata, actual_frames
-    
-    
-    def interleave_fn(self, data):
-        #data = torch.tensor(data).permute((0,2,3,1))
-        if len(self.args.indices)==0:
-            indices = torch.tensor([i for i in range(self.seq_len) if i%self.true_every==0]).to(self.device)
-            not_indices = torch.tensor([i for i in range(self.seq_len) if i%self.true_every!=0]).to(self.device)
-            cond = torch.index_select(data,2,indices)
-            to_be_noised = torch.index_select(data,2,not_indices)
-
-        elif self.num_random_indices>0:
-            indices = torch.tensor([torch.randperm(self.seq_len).tolist() for j in range(data.shape[0])]).to(self.device)
-            #indices = torch.tensor([torch.randperm(self.seq_len)[:self.num_random_indices].tolist() for j in range(data.shape[0])]).to(self.device)
-            #not_indices = torch.tensor([[i for i in range(self.seq_len) if i not in indices[j]] for j in range(data.shape[0])]).to(self.device)
-            data = data.permute((0,1,3,2))
-
-            cond, to_be_noised, indices, not_indices = self.cut_array_from_indices(data,indices)
-            cond = cond.permute((0,1,3,2))
-            to_be_noised = to_be_noised.permute((0,1,3,2))
-            data = data.permute((0,1,3,2))
-            #cond = torch.index_select(data,2,indices)
-            #to_be_noised = torch.index_select(data,2,not_indices)
-
-        else:
-            indices =torch.tensor(self.args.indices).to(self.device)
-            not_indices = torch.tensor([i for i in range(self.seq_len) if i not in self.args.indices]).to(self.device)
-            cond = torch.index_select(data,2,indices)
-            to_be_noised = torch.index_select(data,2,not_indices) 
-
-        return cond, to_be_noised, [indices,not_indices]
-
-    def cut_array_from_indices(self,x,indices): #before using permute so that dimention that is being cut is in last position 
+        return self._pack_out_data(selected_x, loss_of_selected_x, meta_out, return_=return_)
         
-        """container = []
-        not_container = []
-        for batch_ind in range(len(x)):
-                container.append(torch.index_select(x[batch_ind],-1,indices[batch_ind]).unsqueeze(0))
-                not_container.append(torch.index_select(x[batch_ind],-1,not_indices[batch_ind]).unsqueeze(0))
-        container = torch.cat((container),0)
-        not_container = torch.cat((not_container),0)"""
-       
-        #indices = torch.tensor([torch.randperm(self.seq_len).tolist() for j in range(data.shape[0])])
-        mask = indices < self.num_random_indices
-        indices_ = indices[mask].reshape(-1,self.num_random_indices)
-        not_indices = indices[~mask].reshape(-1,self.seq_len-self.num_random_indices)
-        mask = mask[:,None,None,:].expand(-1,self.num_coords,self.num_joints,-1)
-        container = x[mask].reshape(-1,self.num_coords,self.num_joints,self.num_random_indices)
-        not_container = x[~mask].reshape(-1,self.num_coords,self.num_joints,self.seq_len-self.num_random_indices)
-        """container = []
-        not_container = []
-
-
-
-        container = x[indices[:,None,None,:]]
-        not_cointainer = x[not_indices] 
-
-        for batch_ind in range(len(x)):
-            
-            container.append(torch.index_select(x[batch_ind],-1,indices[batch_ind]).unsqueeze(0))
-            not_container.append(torch.index_select(x[batch_ind],-1,not_indices[batch_ind]).unsqueeze(0))
         
-        cointainer = torch.cat(container,0)
-        not_cointainer = torch.cat(not_container,0)"""
+    def training_step(self, batch:List[torch.Tensor], batch_idx:int) -> torch.float32:
+        # Unpack data: tensor_data is the input data, meta_out is a list of metadata
+        tensor_data, _ = self._unpack_data(batch)
+        # Select frames to condition on and to corrupt according to the conditioning strategy
+        condition_data, corrupt_data, idxs = self._select_frames(tensor_data)
+        # Encode the condition data
+        condition_embedding, rec_cond_data = self._encode_condition(condition_data)
+        # Sample the time steps and currupt the data
+        t = self.noise_scheduler.sample_timesteps(corrupt_data.shape[0]).to(self.device_)
+        x_t, noise = self.noise_scheduler.noise_graph(corrupt_data, t.to(corrupt_data.get_device())) 
+        # Predict the noise
+        predicted_noise = self._unet_forward(x_t, t=t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
+        # Compute the loss
+        loss_noise = torch.mean(self.loss_fn(predicted_noise, noise))
+        self.log('loss_noise', loss_noise)      
 
-        
-        return container, not_container, indices_, not_indices
-
-
-    def training_step(self, batch:List[torch.tensor], batch_idx:int) -> torch.float32:
-        data = batch[0] 
-
-        if self.interleave:
-            condition_data, to_be_noised_data, indices = self.interleave_fn(data)
-        elif self.no_condition:
-            condition_data = None
-            to_be_noised_data = data
-        else:
-            condition_data = data[:,:,:self.seq_len//2,:]# [2048,2,12,17]
-            to_be_noised_data = data[:,:,self.seq_len//2:,:]
-        
-        ### Diffusion ###
-        t = self.diffusion.sample_timesteps(to_be_noised_data.shape[0]).to(self.device_)
-        x_t, noise = self.diffusion.noise_graph(to_be_noised_data, t.to(to_be_noised_data.get_device())) 
-        
-        if not self.concat_condition and not self.inject_condition:
-            predicted_noise, _ = self.model(x_t, t, pst=condition_data)
-
-        elif self.inject_condition:
-            if self.args.ae:
-                if self.num_random_indices>0:
-                    gt_data = condition_data
-                    recons_data , condition_data = self.condition_encoder(condition_data,indices=indices[0].to(self.device))
-                else:
-                    gt_data = condition_data
-                    recons_data , condition_data = self.condition_encoder(condition_data)
-            else:
-                condition_data, _ = self.condition_encoder(condition_data, None, None) # [2048, 2, 24, 17] -> [2048, 64, 12, 10]
-            pst = condition_data
-            
-            predicted_noise, _ = self.model(x_t, t, pst=pst, condition_data=condition_data)
-
-        if self.concat_condition:
-            predicted_noise, _ = self.model(x_t, t, pst=condition_data)
-            predicted_noise = predicted_noise[:, :, self.seq_len//2:, :] 
-        loss_noise = F.smooth_l1_loss(predicted_noise, noise)
-        self.log("loss",loss_noise)      
-
-        if self.args.ae:
-                loss_recons = F.mse_loss(recons_data, gt_data)
-                """if self.current_epoch < self.args.pretrain:
-                    loss = loss_recons
-                    for param in self.model.parameters():
-                        param.requires_grad = False
-                else:      
-                    for param in self.model.parameters():
-                        param.requires_grad = True"""
-                
-                loss = loss_noise + loss_recons*self.args.rec_weight
-                self.log("loss_recons",loss_recons)
+        if self.conditioning_architecture == 'AE':
+            loss_rec_cond = F.mse_loss(rec_cond_data, condition_data)
+            loss = loss_noise + loss_rec_cond * self.lambda_
+            self.log("loss_recons", loss_rec_cond)
         else:
             loss = loss_noise
+            
         return loss
     
     
