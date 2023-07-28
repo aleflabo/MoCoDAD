@@ -118,7 +118,7 @@ class Decoder(nn.Module):
         self.bias = bias
         
         # Build the model
-        self.model_layers = self.build_model()
+        self.build_model()
         
     
     def build_model(self):
@@ -159,8 +159,9 @@ class Decoder(nn.Module):
         """
         
         for layer in self.model_layers:
-            out_X = layer(X, t)
-            X = out_X
+            X = layer(X, t)
+        
+        return X
             
             
             
