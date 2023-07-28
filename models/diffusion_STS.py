@@ -1,42 +1,22 @@
-import os
-from typing import Dict, List, Tuple, Union
 import argparse
+import os
 from math import prod
+from typing import Dict, List, Tuple
+
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models.stsae.stsae_unet import STSAE_Unet, STSE_Unet
 from models.stsae.stsae import STSAE, STSE
+from models.stsae.stsae_unet import STSAE_Unet, STSE_Unet
 from sklearn.metrics import roc_auc_score
 from torch.optim import Adam
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 from utils.diffusion_utils import Diffusion
 from utils.eval_utils import (compute_var_matrix, filter_vectors_by_cond,
-                              pad_scores, score_process)
+                              get_avenue_mask, pad_scores, score_process)
 from utils.model_utils import processing_data
-
-V_01 = [1] * 75 + [0] * 46 + [1] * 269 + [0] * 47 + [1] * 427 + [0] * 47 + [1] * 20 + [0] * 70 + [1] * 438  # 1439 Frames
-V_02 = [1] * 272 + [0] * 48 + [1] * 403 + [0] * 41 + [1] * 447  # 1211 Frames
-V_03 = [1] * 293 + [0] * 48 + [1] * 582  # 923 Frames
-V_04 = [1] * 947  # 947 Frames
-V_05 = [1] * 1007  # 1007 Frames
-V_06 = [1] * 561 + [0] * 64 + [1] * 189 + [0] * 193 + [1] * 276  # 1283 Frames
-V_07_to_15 = [1] * 6457
-V_16 = [1] * 728 + [0] * 12  # 740 Frames
-V_17_to_21 = [1] * 1317
-AVENUE_MASK = np.array(V_01 + V_02 + V_03 + V_04 + V_05 + V_06 + V_07_to_15 + V_16 + V_17_to_21) == 1
-
-masked_clips = {
-    1: V_01,
-    2: V_02,
-    3: V_03,
-    6: V_06,
-    16: V_16
-}
-
 
 
 class MoCoDAD(pl.LightningModule):
@@ -91,7 +71,12 @@ class MoCoDAD(pl.LightningModule):
         self.aggregation_strategy = args.aggregation_strategy
         self.n_generated_samples = args.n_generated_samples
         self.model_return_value = args.model_return_value
-        self.val_loss = 0 
+        self.gt_path = args.gt_path
+        self.num_transforms = args.dataset_num_transform
+        self.smoothing = args.smoothing
+        self.pad_size = args.pad_size
+        self.dataset_name = args.dataset_choice
+        self.args = args
         
         # Set the noise scheduler for the diffusion process
         self._set_diffusion_variables()
@@ -101,6 +86,14 @@ class MoCoDAD(pl.LightningModule):
         
     
     def build_model(self) -> None:
+        """
+        Build the model according to the specified hyperparameters.
+        If the conditioning strategy is 'inject', the conditioning network is built and the available architectures are:
+        AutoEncoder (AE), Encoder (E), Encoder-UNet (E_unet). For the other conditioning strategies, the conditioning network is set to `None`.
+
+        Raises:
+            NotImplementedError: if the conditioning architecture is not implemented
+        """
         
         if self.conditioning_strategy == 'inject':
             if self.conditioning_architecture == 'AE':
@@ -130,156 +123,271 @@ class MoCoDAD(pl.LightningModule):
                            inject_condition=(self.conditioning_strategy == 'inject'))
         
         self.condition_encoder, self.model = condition_encoder, model
-        
     
-    def _set_diffusion_variables(self) -> None:
-        self.noise_scheduler = Diffusion(noise_steps=self.noise_steps, n_joints=self.n_joints,
-                                         device=self.device_, time=self.n_frames)
-        self.beta = self.noise_scheduler.schedule_noise().to(self.device_)
-        self.alpha = (1. - self.beta).to(self.device_)
-        self.alpha_hat = torch.cumprod(self.alpha, dim=0).to(self.device_)
         
-    
-    def _infer_number_of_joint(self, args:argparse.Namespace) -> int:
+    def forward(self, input_data:List[torch.Tensor], aggr_strategy:str=None, return_:str=None) -> List[torch.Tensor]:
         """
-        Infer the number of joints based on the dataset parameters.
+        Forward pass of the model.
 
         Args:
-            args (argparse.Namespace): arguments containing the hyperparameters of the model
+            input_data (List[torch.Tensor]): list containing the following tensors:
+                                             - tensor_data: tensor of shape (B, C, T, V) containing the input sequences
+                                             - transformation_idx
+                                             - metadata
+                                             - actual_frames
+            aggr_strategy (str, optional): aggregation strategy to use. If not specified as a function parameter, the aggregation strategy 
+                                           specified in the model hyperparameters is used. Defaults to None. 
+            return_ (str, optional): return value of the model: 
+                                     - only the selected poses according to the aggregation strategy ('pose')
+                                     - only the loss of the selected poses ('loss')
+                                     - both ('all'). 
+                                     If not specified as a function parameter, the return value specified in the model hyperparameters is used. Defaults to None.
 
         Returns:
-            int: number of joints
+            List[torch.Tensor]: [predicted poses and the loss, tensor_data, transformation_idx, metadata, actual_frames]
         """
         
-        if args.dataset_headless:
-            joints_to_consider = 14
-        elif args.dataset_kp18_format:
-            joints_to_consider = 18
-        else:
-            joints_to_consider = 17
-        return joints_to_consider
-    
-    
-    def _set_conditioning_strategy(self) -> Tuple[int]:
-        if self.conditioning_strategy == 'no_condition':
-            n_frames_cond = 0
-        elif self.conditioning_strategy == 'concat' or self.conditioning_strategy == 'inject':
-            if isinstance(self.conditioning_indices, int):
-                n_frames_cond = self.n_frames // self.conditioning_indices
-            else:
-                n_frames_cond = len(self.conditioning_indices)
-                assert self.conditioning_indices == list(range(min(self.conditioning_indices), max(self.conditioning_indices)+1)), \
-                    'Conditioning indices must be a list of consecutive integers'
-                assert (min(self.conditioning_indices) == 0) or (max(self.conditioning_indices) == (self.n_frames-1)), \
-                    'Conditioning indices must start from 0 or end at the last frame'
-        elif self.conditioning_strategy == 'interleave' or self.conditioning_strategy == 'random_imp':
-            if isinstance(self.conditioning_indices, int):
-                n_frames_cond = self.conditioning_indices
-            else:
-                n_frames_cond = len(self.conditioning_indices)
-                assert self.conditioning_strategy != 'random_imp', \
-                    'Random imputation requires an integer number of frames to condition on, not a list of indices'
-        else:
-            raise NotImplementedError(f'Conditioning strategy {self.conditioning_strategy} not implemented')
-        
-        n_frames_to_corrupt = self.n_frames - n_frames_cond
-        return n_frames_cond, n_frames_to_corrupt
-    
-    
-    def _pos_encoding(self, t, channels):
-        return self.model.pos_encoding(t, channels)
-    
-    
-    def _encode_condition(self, condition_data:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        if self.condition_encoder is None:
-            return None, None
-        
-        return self.condition_encoder(condition_data, t=None)
-    
-    
-    def _unpack_data(self, x:torch.Tensor) -> List[torch.Tensor]:
-        tensor_data = x[0].to(self.device_)
-        transformation_idx = x[1]
-        metadata = x[2]
-        actual_frames = x[3]
-        meta_out = [transformation_idx, metadata, actual_frames]
-        return tensor_data, meta_out
-    
-    
-    def _pack_out_data(self, selected_x:torch.Tensor, loss_of_selected_x:torch.Tensor, meta_out:List[torch.Tensor], return_:str) -> torch.Tensor:
-        
-        if return_ is None:
-            if self.model_return_value is None:
-                raise ValueError('Either return_ or self.model_return_value must be set')
-            else:
-                return_ = self.model_return_value
+        # Unpack data: tensor_data is the input data, meta_out is a list of metadata
+        tensor_data, meta_out = self._unpack_data(input_data)
+        B = tensor_data.shape[0]
+        # Select frames to condition on and to corrupt according to the conditioning strategy
+        condition_data, corrupt_data, idxs = self._select_frames(tensor_data)
+        # Encode the condition data
+        condition_embedding, _ = self._encode_condition(condition_data)
 
-        if return_ == 'pose':
-            out = [selected_x]
-        elif return_ == 'loss':
-            out = [loss_of_selected_x]
-        elif return_ == 'all':
-            out = [selected_x, loss_of_selected_x]
+        generated_xs = []
+        for _ in range(self.n_generated_samples):
+            # Generate gaussian noise of the same shape as the corrupt_data
+            x = torch.randn_like(corrupt_data, device=self.device_)
+            for i in reversed(range(1, self.noise_steps)):
+                
+                # Set the time step
+                t = torch.full(size=(B,), fill_value=i, dtype=torch.long, device=self.device_)
+                # Predict the noise
+                predicted_noise = self._unet_forward(x, t=t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
+                # Get the alpha and beta values and expand them to the shape of the predicted noise
+                alpha = self.alpha[t][:, None, None, None]
+                alpha_hat = self.alpha_hat[t][:, None, None, None]
+                beta = self.beta[t][:, None, None, None]
+                # Generate gaussian noise of the same shape as the predicted noise
+                noise = torch.randn_like(x, device=self.device_) if i > 1 else torch.zeros_like(x, device=self.device_)
+                # Recover the predicted sequence
+                x = (1 / torch.sqrt(alpha) ) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
+            # Append the generated sequence to the list of generated sequences
+            generated_xs.append(x)
             
-        return out + meta_out
-    
-    
-    def _cut_array_from_indices(self, x:torch.Tensor, indices:torch.Tensor) -> Tuple[torch.Tensor]:
-    
-        mask = indices < self.conditioning_indices
-        indices_ = indices[mask].reshape(-1, self.conditioning_indices)
-        not_indices = indices[~mask].reshape(-1, self.n_frames-self.conditioning_indices)
-        mask = mask[:,None,None,:].expand(-1, self.num_coords, self.n_joints, -1)
-        container = x[mask].reshape(-1, self.num_coords, self.n_joints, self.conditioning_indices)
-        not_container = x[~mask].reshape(-1, self.num_coords, self.n_joints, self.n_frames-self.conditioning_indices)
+        selected_x, loss_of_selected_x = self._aggregation_strategy(generated_xs, corrupt_data, aggr_strategy)
         
-        return container, not_container, indices_, not_indices
-    
-    
-    def _select_frames(self, data:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor]]:
+        return self._pack_out_data(selected_x, loss_of_selected_x, [tensor_data] + meta_out, return_=return_)
         
-        if self.conditioning_strategy == 'random_imp':
+        
+    def training_step(self, batch:List[torch.Tensor], batch_idx:int) -> torch.float32:
+        """
+        Training step of the model.
 
-            indices = torch.tensor([torch.randperm(self.n_frames).tolist() for _ in range(data.shape[0])], device=self.device_)
-            cond_data, corrupt_data, cond_idxs, corrupt_idxs = self._cut_array_from_indices(data.permute((0,1,3,2)), indices)
-            cond_data = cond_data.permute((0,1,3,2))
-            corrupt_data = corrupt_data.permute((0,1,3,2))
+        Args:
+            batch (List[torch.Tensor]): list containing the following tensors:
+                                        - tensor_data: tensor of shape (B, C, T, V) containing the input sequences
+                                        - transformation_idx
+                                        - metadata
+                                        - actual_frames
+            batch_idx (int): index of the batch
+
+        Returns:
+            torch.float32: loss of the model
+        """
         
-        elif self.conditioning_strategy == 'no_condition':
-            cond_data, cond_idxs = None, None
-            corrupt_data, corrupt_idxs = data, torch.arange(self.n_frames, device=self.device_)
-            
-        elif len(self.conditioning_indices) == 0:
-            if self.conditioning_strategy == 'interleave': 
-                cond_idxs = torch.arange(start=0, end=self.n_frames, step=self.conditioning_indices, device=self.device_)
-                corrupt_idxs = torch.arange(start=1, end=self.n_frames, step=self.conditioning_indices, device=self.device_)
-            else:
-                cond_idxs = torch.arange(start=0, end=self.n_frames//self.conditioning_indices, device=self.device_)
-                corrupt_idxs = torch.arange(start=self.n_frames//self.conditioning_indices, end=self.n_frames, device=self.device_)
-            cond_data = torch.index_select(data, 2, cond_idxs)
-            corrupt_data = torch.index_select(data, 2, corrupt_idxs)
-            
+        # Unpack data: tensor_data is the input data, meta_out is a list of metadata
+        tensor_data, _ = self._unpack_data(batch)
+        # Select frames to condition on and to corrupt according to the conditioning strategy
+        condition_data, corrupt_data, idxs = self._select_frames(tensor_data)
+        # Encode the condition data
+        condition_embedding, rec_cond_data = self._encode_condition(condition_data)
+        # Sample the time steps and currupt the data
+        t = self.noise_scheduler.sample_timesteps(corrupt_data.shape[0]).to(self.device_)
+        x_t, noise = self.noise_scheduler.noise_graph(corrupt_data, t.to(corrupt_data.get_device())) 
+        # Predict the noise
+        predicted_noise = self._unet_forward(x_t, t=t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
+        # Compute the loss
+        loss_noise = torch.mean(self.loss_fn(predicted_noise, noise))
+        self.log('loss_noise', loss_noise)      
+
+        if self.conditioning_architecture == 'AE':
+            loss_rec_cond = F.mse_loss(rec_cond_data, condition_data)
+            loss = loss_noise + loss_rec_cond * self.lambda_
+            self.log("loss_recons", loss_rec_cond)
         else:
-            cond_idxs = torch.tensor(self.conditioning_indices, device=self.device_)
-            corrupt_idxs = torch.tensor([i for i in range(self.n_frames) if i not in self.conditioning_indices], device=self.device_)
-            cond_data = torch.index_select(data, 2, cond_idxs)
-            corrupt_data = torch.index_select(data, 2, corrupt_idxs) 
+            loss = loss_noise
+            
+        return loss
+    
+    
+    def validation_step(self, batch:List[torch.Tensor], batch_idx:int) -> List[torch.Tensor]:
+        """
+        Validation step of the model.
 
-        return cond_data, corrupt_data, [cond_idxs, corrupt_idxs]
-    
-    
-    def _unet_forward(self, corrupt_data:torch.Tensor, t:torch.Tensor=None, condition_data:torch.Tensor=None, 
-                      *, corrupt_idxs:torch.Tensor) -> torch.Tensor:
+        Args:
+            batch (List[torch.Tensor]): list containing the following tensors:
+                                        - tensor_data: tensor of shape (B, C, T, V) containing the input sequences
+                                        - transformation_idx
+                                        - metadata
+                                        - actual_frames
+            batch_idx (int): index of the batch
+
+        Returns:
+            List[torch.Tensor]: [predicted poses and the loss, tensor_data, transformation_idx, metadata, actual_frames]
+        """
         
-        prediction, _ = self.model(corrupt_data, t, condition_data=condition_data)
+        return self.forward(batch)
+
+
+    def validation_epoch_end(self, validation_step_outputs:List[torch.Tensor]) -> float:
+        """
+        Validation epoch end of the model.
+
+        Args:
+            validation_step_outputs (List[torch.Tensor]): list containing the output of the model and the input data
+
+        Returns:
+            float: validation auc score
+        """
         
-        if self.conditioning_strategy != 'inject':
-            prediction = prediction[:, corrupt_idxs]
+        out, gt_data, trans, meta, frames = processing_data(validation_step_outputs)
+        return self.post_processing(out, gt_data, trans, meta, frames)
+
+    
+    def configure_optimizers(self) -> Dict:
+        """
+        Configure the optimizers and the learning rate schedulers.
+
+        Returns:
+            Dict: dictionary containing the optimizers, the learning rate schedulers and the metric to monitor
+        """
         
-        return prediction 
+        optimizer = Adam(self.parameters(), lr=self.learning_rate)
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99, last_epoch=-1, verbose=False)
+        return {'optimizer':optimizer,'lr_scheduler':scheduler,'monitor':'validation_auc'}
+            
+
+    def post_processing(self, out:np.ndarray, gt_data:np.ndarray, trans:np.ndarray, meta:np.ndarray, frames:np.ndarray) -> float:
+        """
+        Post processing of the model.
+
+        Args:
+            out (np.ndarray): output of the model
+            gt_data (np.ndarray): ground truth data
+            trans (np.ndarray): transformation index
+            meta (np.ndarray): metadata
+            frames (np.ndarray): frame indexes of the data
+
+        Returns:
+            float: validation auc score
+        """
+        
+        all_gts = [file_name for file_name in os.listdir(self.gt_path) if file_name.endswith('.npy')]
+        all_gts = sorted(all_gts)
+        scene_clips = [(int(fn.split('_')[0]), int(fn.split('_')[1].split('.')[0])) for fn in all_gts]
+
+        num_transform = self.num_transforms
+        smoothing = self.smoothing
+        model_scores_transf = {}
+        dataset_gt_transf = {}
+
+        for transformation in tqdm(range(num_transform)):
+            # iterating over each transformation T
+            
+            dataset_gt = []
+            model_scores = []
+            cond_transform = (trans == transformation)
+
+            out_transform, gt_data_transform, meta_transform, frames_transform = filter_vectors_by_cond([out, gt_data, meta, frames], cond_transform)
+
+            for idx in range(len(all_gts)):
+                # iterating over each clip C with transformation T
+                
+                scene_idx, clip_idx = scene_clips[idx]
+                gt = np.load(os.path.join(self.gt_path, all_gts[idx]))
+                n_frames = gt.shape[0]
+                
+                cond_scene_clip = (meta_transform[:, 0] == scene_idx) & (meta_transform[:, 1] == clip_idx)
+                out_scene_clip, gt_scene_clip, meta_scene_clip, frames_scene_clip = filter_vectors_by_cond([out_transform, gt_data_transform, 
+                                                                                                            meta_transform, frames_transform], 
+                                                                                                           cond_scene_clip) 
+                
+                figs_ids = sorted(list(set(meta_scene_clip[:, 2])))
+                error_per_person = []
+                
+                for fig in figs_ids:
+                    # iterating over each actor A in each clip C with transformation T
+
+                    cond_fig = (meta_scene_clip[:, 2] == fig)
+                    out_fig, gt_fig, frames_fig = filter_vectors_by_cond([out_scene_clip, gt_scene_clip, frames_scene_clip], cond_fig) 
+
+                    loss_matrix = compute_var_matrix(out_fig, frames_fig, n_frames)
+                    loss_matrix = np.where(loss_matrix == 0.0, np.nan, loss_matrix)
+                    fig_reconstruction_loss = np.nanmedian(loss_matrix, 0)
+                    fig_reconstruction_loss = np.where(np.isnan(fig_reconstruction_loss), 0, fig_reconstruction_loss) 
+                    if self.pad_size != -1:
+                        fig_reconstruction_loss = pad_scores(fig_reconstruction_loss, gt, self.pad_size)                    
+                    
+                    error_per_person.append(fig_reconstruction_loss)
+
+                clip_score = np.amax(np.stack(error_per_person, axis=0), axis=0)
+                
+                # removing the non-HR frames for Avenue dataset
+                masked_clips = get_avenue_mask()
+                if clip_idx in masked_clips:
+                    clip_score = clip_score[np.array(masked_clips[clip_idx])==1]
+                    gt = gt[np.array(masked_clips[clip_idx])==1]
+
+                clip_score = score_process(clip_score, win_size=smoothing, dataname=self.dataset_name, use_scaler=False)
+                model_scores.append(clip_score)
+                dataset_gt.append(gt)
+                    
+            model_scores = np.concatenate(model_scores, axis=0)
+            dataset_gt = np.concatenate(dataset_gt, axis=0)
+
+            model_scores_transf[transformation] = model_scores
+            dataset_gt_transf[transformation] = dataset_gt
+
+        # aggregating the anomaly scores for all transformations
+        pds = np.mean(np.stack(list(model_scores_transf.values()),0),0)
+        gt = dataset_gt_transf[0]
+        
+        # computing the AUC
+        auc = roc_auc_score(gt,pds)
+        self.log('validation_auc', auc)
+        
+        return auc
     
     
-    def _aggregation_strategy(self, generated_xs:List[torch.Tensor], input_sequence:torch.Tensor, aggr_strategy:str):
+    ## Helper functions
+    
+    def _aggregation_strategy(self, generated_xs:List[torch.Tensor], input_sequence:torch.Tensor, aggr_strategy:str) -> Tuple[torch.Tensor]:
+        """
+        Aggregates the generated samples and returns the selected one and its reconstruction error.
+        Strategies:
+            - all: returns all the generated samples
+            - random: returns a random sample
+            - best: returns the sample with the lowest reconstruction loss
+            - worst: returns the sample with the highest reconstruction loss
+            - mean: returns the mean of the losses of the generated samples
+            - median: returns the median of the losses of the generated samples
+            - mean_pose: returns the mean of the generated samples
+            - median_pose: returns the median of the generated samples
+
+        Args:
+            generated_xs (List[torch.Tensor]): list of generated samples
+            input_sequence (torch.Tensor): ground truth sequence
+            aggr_strategy (str): aggregation strategy
+
+        Raises:
+            ValueError: if the aggregation strategy is not valid
+
+        Returns:
+            Tuple[torch.Tensor]: selected sample and its reconstruction error
+        """
+
         aggr_strategy = self.aggregation_strategy if aggr_strategy is None else aggr_strategy 
         if aggr_strategy == 'random':
             return generated_xs[np.random.randint(len(generated_xs))]
@@ -319,183 +427,247 @@ class MoCoDAD(pl.LightningModule):
         
         return selected_x, loss_of_selected_x
     
-        
-    def forward(self, input_data:List[torch.Tensor], condition_data:torch.Tensor=None, aggr_strategy:str=None, return_:str=None) -> List[torch.Tensor]:
-        
-        # Unpack data: tensor_data is the input data, meta_out is a list of metadata
-        tensor_data, meta_out = self._unpack_data(input_data)
-        B = tensor_data.shape[0]
-        # Select frames to condition on and to corrupt according to the conditioning strategy
-        condition_data, corrupt_data, idxs = self._select_frames(tensor_data)
-        # Encode the condition data
-        condition_embedding, _ = self._encode_condition(condition_data)
+    
+    def _cut_array_from_indices(self, x:torch.Tensor, indices:torch.Tensor) -> Tuple[torch.Tensor]:
+        """
+        Cuts the input array according to the indices. This function is called when the conditioning strategy is 'random imputation'.
 
-        generated_xs = []
-        for _ in range(self.n_generated_samples):
-            # Generate gaussian noise of the same shape as the corrupt_data
-            x = torch.randn_like(corrupt_data, device=self.device_)
-            for i in reversed(range(1, self.noise_steps)):
-                
-                # Set the time step
-                t = torch.full(size=(B,), fill_value=i, dtype=torch.long, device=self.device_)
-                # Predict the noise
-                predicted_noise = self._unet_forward(x, t=t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
-                # Get the alpha and beta values and expand them to the shape of the predicted noise
-                alpha = self.alpha[t][:, None, None, None]
-                alpha_hat = self.alpha_hat[t][:, None, None, None]
-                beta = self.beta[t][:, None, None, None]
-                # Generate gaussian noise of the same shape as the predicted noise
-                noise = torch.randn_like(x, device=self.device_) if i > 1 else torch.zeros_like(x, device=self.device_)
-                # Recover the predicted sequence
-                x = (1 / torch.sqrt(alpha) ) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
-            # Append the generated sequence to the list of generated sequences
-            generated_xs.append(x)
-            
-        selected_x, loss_of_selected_x = self._aggregation_strategy(generated_xs, corrupt_data, aggr_strategy)
-        
-        return self._pack_out_data(selected_x, loss_of_selected_x, meta_out, return_=return_)
-        
-        
-    def training_step(self, batch:List[torch.Tensor], batch_idx:int) -> torch.float32:
-        # Unpack data: tensor_data is the input data, meta_out is a list of metadata
-        tensor_data, _ = self._unpack_data(batch)
-        # Select frames to condition on and to corrupt according to the conditioning strategy
-        condition_data, corrupt_data, idxs = self._select_frames(tensor_data)
-        # Encode the condition data
-        condition_embedding, rec_cond_data = self._encode_condition(condition_data)
-        # Sample the time steps and currupt the data
-        t = self.noise_scheduler.sample_timesteps(corrupt_data.shape[0]).to(self.device_)
-        x_t, noise = self.noise_scheduler.noise_graph(corrupt_data, t.to(corrupt_data.get_device())) 
-        # Predict the noise
-        predicted_noise = self._unet_forward(x_t, t=t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
-        # Compute the loss
-        loss_noise = torch.mean(self.loss_fn(predicted_noise, noise))
-        self.log('loss_noise', loss_noise)      
+        Args:
+            x (torch.Tensor): input sequence
+            indices (torch.Tensor): indices of the conditioning frames
 
-        if self.conditioning_architecture == 'AE':
-            loss_rec_cond = F.mse_loss(rec_cond_data, condition_data)
-            loss = loss_noise + loss_rec_cond * self.lambda_
-            self.log("loss_recons", loss_rec_cond)
+        Returns:
+            Tuple[torch.Tensor]: conditioning frames, non-conditioning frames, conditioning indices, non-conditioning indices
+        """
+        
+        mask = indices < self.conditioning_indices
+        indices_ = indices[mask].reshape(-1, self.conditioning_indices)
+        not_indices = indices[~mask].reshape(-1, self.n_frames-self.conditioning_indices)
+        mask = mask[:,None,None,:].expand(-1, self.num_coords, self.n_joints, -1)
+        container = x[mask].reshape(-1, self.num_coords, self.n_joints, self.conditioning_indices)
+        not_container = x[~mask].reshape(-1, self.num_coords, self.n_joints, self.n_frames-self.conditioning_indices)
+        
+        return container, not_container, indices_, not_indices
+    
+    
+    def _encode_condition(self, condition_data:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Encodes the conditioning data if the conditioning strategy is 'inject', returns None otherwise.
+
+        Args:
+            condition_data (torch.Tensor): conditioning data
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: encoded conditioning data, reconstructed conditioning data (if AE is used as condition encoder)
+        """
+        
+        if self.condition_encoder is None:
+            return None, None
+        
+        return self.condition_encoder(condition_data, t=None)
+        
+    
+    def _infer_number_of_joint(self, args:argparse.Namespace) -> int:
+        """
+        Infer the number of joints based on the dataset parameters.
+
+        Args:
+            args (argparse.Namespace): arguments containing the hyperparameters of the model
+
+        Returns:
+            int: number of joints
+        """
+        
+        if args.dataset_headless:
+            joints_to_consider = 14
+        elif args.dataset_kp18_format:
+            joints_to_consider = 18
         else:
-            loss = loss_noise
+            joints_to_consider = 17
+        return joints_to_consider
+    
+    
+    def _pack_out_data(self, selected_x:torch.Tensor, loss_of_selected_x:torch.Tensor, additional_out:List[torch.Tensor], return_:str) -> List[torch.Tensor]:
+        """
+        Packs the output data according to the return_ argument.
+
+        Args:
+            selected_x (torch.Tensor): generated samples selected among the others according to the aggregation strategy
+            loss_of_selected_x (torch.Tensor): loss of the selected samples
+            additional_out (List[torch.Tensor]): additional output data (ground truth, meta-data, etc.)
+            return_ (str): return strategy. Can be 'pose', 'loss', 'all'
+
+        Raises:
+            ValueError: if return_ is None and self.model_return_value is None
+
+        Returns:
+            List[torch.Tensor]: output data
+        """
+        
+        if return_ is None:
+            if self.model_return_value is None:
+                raise ValueError('Either return_ or self.model_return_value must be set')
+            else:
+                return_ = self.model_return_value
+
+        if return_ == 'pose':
+            out = [selected_x]
+        elif return_ == 'loss':
+            out = [loss_of_selected_x]
+        elif return_ == 'all':
+            out = [loss_of_selected_x, selected_x]
             
-        return loss
+        return out + additional_out
     
     
-    def validation_step(self, batch, batch_idx):
-        return self.forward(batch)
+    def _pos_encoding(self, t:torch.Tensor, channels:int) -> torch.Tensor:
+        """
+        Encodes the time information of the input sequence.
 
+        Args:
+            t (torch.Tensor): time steps
+            channels (int): dimension of the encoding
 
-    def validation_epoch_end(self, validation_step_outputs:Union[Tuple[torch.tensor],List[torch.tensor]]):
-        out, gt_data, trans, meta, frames = processing_data(validation_step_outputs)
-        return self.post_processing(out, gt_data, trans, meta, frames)
-
+        Returns:
+            torch.Tensor: encoded time steps
+        """
+        
+        return self.model.pos_encoding(t, channels)
     
-    def configure_optimizers(self) -> Dict:
-        optimizer = Adam(self.parameters(), lr=self.learning_rate)
+    
+    def _select_frames(self, data:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor]]:
+        """
+        Selects the conditioning frames according to the conditioning strategy.
 
-        """scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
-                                                                    mode='max',
-                                                                    factor=0.2,
-                                                                    patience=5,
-                                                                    min_lr=1e-6,
-                                                                    verbose=True)"""
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99, last_epoch=- 1, verbose=False)
-        return {'optimizer':optimizer,'lr_scheduler':scheduler,'monitor':'validation_auc'}
+        Args:
+            data (torch.Tensor): input sequence
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor]]: conditioning frames, non-conditioning frames, indexes
+        """
         
+        if self.conditioning_strategy == 'random_imp':
+            # Randomly select the indices of the conditioning frames and cut the input sequence accordingly
+            indices = torch.tensor([torch.randperm(self.n_frames).tolist() for _ in range(data.shape[0])], device=self.device_)
+            cond_data, corrupt_data, cond_idxs, corrupt_idxs = self._cut_array_from_indices(data.permute((0,1,3,2)), indices)
+            cond_data = cond_data.permute((0,1,3,2))
+            corrupt_data = corrupt_data.permute((0,1,3,2))
         
-                    
-
-    def post_processing(self, out:np.ndarray, gt_data:np.ndarray, trans:int, meta:np.ndarray, frames:np.ndarray) -> float:
-        all_gts = [file_name for file_name in os.listdir(self.args.gt_path) if file_name.endswith('.npy')]
-        all_gts = sorted(all_gts)
-        scene_clips = [(int(fn.split('_')[0]), int(fn.split('_')[1].split('.')[0])) for fn in all_gts]
-
-        num_transform = self.args.dataset_num_transform
-        smoothing = self.args.smoothing
-        model_scores_transf = {}
-        dataset_gt_transf = {}
-
-        
-        for transformation in tqdm(range(num_transform)):
-            # iterating over each transformation T
+        elif self.conditioning_strategy == 'no_condition':
+            # The input to the model is the whole sequence
+            cond_data, cond_idxs = None, None
+            corrupt_data, corrupt_idxs = data, torch.arange(self.n_frames, device=self.device_)
             
-            dataset_gt = []
-            model_scores = []
-            cond_transform = (trans == transformation)
+        elif len(self.conditioning_indices) == 0:
+            if self.conditioning_strategy == 'interleave': 
+                # Take conditioning frames with step equal to `conditioning indices` starting from the first frame
+                cond_idxs = torch.arange(start=0, end=self.n_frames, step=self.conditioning_indices, device=self.device_)
+                corrupt_idxs = torch.arange(start=1, end=self.n_frames, step=self.conditioning_indices, device=self.device_)
+            else:
+                # Use the integer in `conditioning indices` to split the input sequence in two parts
+                cond_idxs = torch.arange(start=0, end=self.n_frames//self.conditioning_indices, device=self.device_)
+                corrupt_idxs = torch.arange(start=self.n_frames//self.conditioning_indices, end=self.n_frames, device=self.device_)
+            cond_data = torch.index_select(data, 2, cond_idxs)
+            corrupt_data = torch.index_select(data, 2, corrupt_idxs)
+            
+        else:
+            # Take the indices explicitly specified in `conditioning indices`
+            cond_idxs = torch.tensor(self.conditioning_indices, device=self.device_)
+            corrupt_idxs = torch.tensor([i for i in range(self.n_frames) if i not in self.conditioning_indices], device=self.device_)
+            cond_data = torch.index_select(data, 2, cond_idxs)
+            corrupt_data = torch.index_select(data, 2, corrupt_idxs) 
 
-            out_transform, gt_data_transform, meta_transform, frames_transform = filter_vectors_by_cond([out, gt_data, meta, frames], cond_transform)
+        return cond_data, corrupt_data, [cond_idxs, corrupt_idxs]
+    
+    
+    def _set_conditioning_strategy(self) -> Tuple[int]:
+        """
+        Sets the conditioning strategy.
 
+        Raises:
+            NotImplementedError: if the conditioning strategy is not implemented
 
-            for idx in range(len(all_gts)):
-                # iterating over each clip C with transformation T
-                
-                scene_idx, clip_idx = scene_clips[idx]
-                gt = np.load(os.path.join(self.args.gt_path, all_gts[idx]))
-                n_frames = gt.shape[0]
-                
-                cond_scene_clip = (meta_transform[:, 0] == scene_idx) & (meta_transform[:, 1] == clip_idx)
-                out_scene_clip, gt_scene_clip, meta_scene_clip, frames_scene_clip = filter_vectors_by_cond([out_transform, gt_data_transform, meta_transform, frames_transform], cond_scene_clip) 
-                
-                figs_ids = sorted(list(set(meta_scene_clip[:, 2])))
-                error_per_person = []
-                
-                for fig in figs_ids:
-                    # iterating over each actor A in each clip C with transformation T
-                    
-                    cond_fig = (meta_scene_clip[:, 2] == fig)
-                    out_fig, gt_fig, frames_fig = filter_vectors_by_cond([out_scene_clip, gt_scene_clip, frames_scene_clip], cond_fig) 
-
-                    
-                    loss_matrix = compute_var_matrix(out_fig, frames_fig, n_frames)
-                    loss_matrix = np.where(loss_matrix == 0.0, np.nan, loss_matrix)
-                    fig_reconstruction_loss = np.nanmedian(loss_matrix, 0)
-                    fig_reconstruction_loss = np.where(np.isnan(fig_reconstruction_loss), 0, fig_reconstruction_loss) 
-                    if self.args.pad_size!=-1:
-                        fig_reconstruction_loss = pad_scores(fig_reconstruction_loss, gt, self.args.pad_size)                    
-                    
-                    error_per_person.append(fig_reconstruction_loss)
-
-                clip_score = np.amax(np.stack(error_per_person, axis=0), axis=0)
-                
-                # removing the non-HR frames for Avenue dataset
-                if clip_idx in masked_clips:
-                    clip_score = clip_score[np.array(masked_clips[clip_idx])==1]
-                    gt = gt[np.array(masked_clips[clip_idx])==1]
-
-                clip_score = score_process(clip_score, win_size=smoothing, dataname=self.args.dataset_choice, use_scaler=False)
-                model_scores.append(clip_score)
-                dataset_gt.append(gt)
-                    
-            model_scores = np.concatenate(model_scores, axis=0)
-            dataset_gt = np.concatenate(dataset_gt, axis=0)
-
-            model_scores_transf[transformation] = model_scores
-            dataset_gt_transf[transformation] = dataset_gt
-
-        # aggregating the anomaly scores for all transformations
-        pds = np.mean(np.stack(list(model_scores_transf.values()),0),0)
-        gt = dataset_gt_transf[0]
+        Returns:
+            Tuple[int]: number of conditioning frames, number of non-conditioning frames (input to the model)
+        """
         
-        # computing the AUC
-        auc = roc_auc_score(gt,pds)
-        self.log('validation_auc', auc)
+        if self.conditioning_strategy == 'no_condition':
+            n_frames_cond = 0
+            
+        elif self.conditioning_strategy == 'concat' or self.conditioning_strategy == 'inject':
+            if isinstance(self.conditioning_indices, int):
+                n_frames_cond = self.n_frames // self.conditioning_indices
+            else:
+                n_frames_cond = len(self.conditioning_indices)
+                assert self.conditioning_indices == list(range(min(self.conditioning_indices), max(self.conditioning_indices)+1)), \
+                    'Conditioning indices must be a list of consecutive integers'
+                assert (min(self.conditioning_indices) == 0) or (max(self.conditioning_indices) == (self.n_frames-1)), \
+                    'Conditioning indices must start from 0 or end at the last frame'
+                    
+        elif self.conditioning_strategy == 'interleave' or self.conditioning_strategy == 'random_imp':
+            if isinstance(self.conditioning_indices, int):
+                n_frames_cond = self.conditioning_indices
+            else:
+                n_frames_cond = len(self.conditioning_indices)
+                assert self.conditioning_strategy != 'random_imp', \
+                    'Random imputation requires an integer number of frames to condition on, not a list of indices'
+                    
+        else:
+            raise NotImplementedError(f'Conditioning strategy {self.conditioning_strategy} not implemented')
         
-        return auc
+        n_frames_to_corrupt = self.n_frames - n_frames_cond
+        return n_frames_cond, n_frames_to_corrupt
+    
+    
+    def _set_diffusion_variables(self) -> None:
+        """
+        Sets the diffusion variables.
+        """
+        
+        self.noise_scheduler = Diffusion(noise_steps=self.noise_steps, n_joints=self.n_joints,
+                                         device=self.device_, time=self.n_frames)
+        self.beta = self.noise_scheduler.schedule_noise().to(self.device_)
+        self.alpha = (1. - self.beta).to(self.device_)
+        self.alpha_hat = torch.cumprod(self.alpha, dim=0).to(self.device_)
+        
+        
+    def _unet_forward(self, corrupt_data:torch.Tensor, t:torch.Tensor=None, condition_data:torch.Tensor=None, 
+                      *, corrupt_idxs:torch.Tensor) -> torch.Tensor:
+        """
+        Performs a forward pass of the UNet model.
 
+        Args:
+            corrupt_data (torch.Tensor): input tensor of shape (batch_size, n_coords, n_joints, n_frames)
+            corrupt_idxs (torch.Tensor): indices of the frames for which the model should predict the noise
+            t (torch.Tensor, optional): encoded time tensor. Defaults to None.
+            condition_data (torch.Tensor, optional): conditioning embedding of shape (batch_size, latent_dim). Defaults to None.
 
+        Returns:
+            torch.Tensor: predicted noise of shape (batch_size, n_coords, n_joints, n_frames)
+        """
+        
+        prediction, _ = self.model(corrupt_data, t, condition_data=condition_data)
+        
+        if self.conditioning_strategy != 'inject':
+            prediction = prediction[:, corrupt_idxs]
+        
+        return prediction 
+    
+    
+    def _unpack_data(self, x:torch.Tensor) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        """
+        Unpacks the data.
 
+        Args:
+            x (torch.Tensor): list containing the input data, the transformation index, the metadata and the actual frames.
 
-
-# using LightningDataModule
-class LitDataModule(pl.LightningDataModule):
-    def __init__(self, batch_size, train_dataset):
-        super().__init__()
-        self.save_hyperparameters()
-        # or
-        self.batch_size = batch_size
-        self.train_dataset = train_dataset
-
-    def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size | self.hparams.batch_size, num_workers=8, pin_memory=True)
+        Returns:
+            Tuple[torch.Tensor, List[torch.Tensor]]: input data, list containing the transformation index, the metadata and the actual frames.
+        """
+        tensor_data = x[0].to(self.device_)
+        transformation_idx = x[1]
+        metadata = x[2]
+        actual_frames = x[3]
+        meta_out = [transformation_idx, metadata, actual_frames]
+        return tensor_data, meta_out
 
