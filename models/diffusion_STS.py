@@ -43,8 +43,7 @@ class MoCoDAD(pl.LightningModule):
         
         # Set the internal variables of the model
         # Data parameters
-        self.batch_size = args.dataset_batch_size
-        self.n_frames = args.dataset_seg_len
+        self.n_frames = args.seg_len
         self.num_coords = args.num_coords
         self.n_joints = self._infer_number_of_joint(args)
         
@@ -54,9 +53,9 @@ class MoCoDAD(pl.LightningModule):
         self.embedding_dim = args.embedding_dim 
         self.dropout = args.dropout
         self.conditioning_strategy = self.conditioning_strategies[args.conditioning_strategy]
+        # Conditioning network
         self.conditioning_indices = args.conditioning_indices
         self.n_frames_condition, self.n_frames_corrupt = self._set_conditioning_strategy()        
-        # Conditioning network
         self.conditioning_architecture = args.conditioning_architecture
         self.cond_h_dim = args.h_dim
         self.cond_latent_dim = args.latent_dim
@@ -66,17 +65,15 @@ class MoCoDAD(pl.LightningModule):
         # Training and inference parameters
         self.learning_rate = args.opt_lr
         self.loss_fn = self.losses[args.loss_fn](reduction='none')
-        self.lambda_ = args.lambda_ # weight of the reconstruction loss
+        self.rec_weight = args.rec_weight # weight of the reconstruction loss
         self.noise_steps = args.noise_steps
         self.aggregation_strategy = args.aggregation_strategy
         self.n_generated_samples = args.n_generated_samples
         self.model_return_value = args.model_return_value
         self.gt_path = args.gt_path
-        self.num_transforms = args.dataset_num_transform
-        self.smoothing = args.smoothing
+        self.num_transforms = args.num_transform
         self.pad_size = args.pad_size
         self.dataset_name = args.dataset_choice
-        self.args = args
         
         # Set the noise scheduler for the diffusion process
         self._set_diffusion_variables()
@@ -214,12 +211,46 @@ class MoCoDAD(pl.LightningModule):
 
         if self.conditioning_architecture == 'AE':
             loss_rec_cond = F.mse_loss(rec_cond_data, condition_data)
-            loss = loss_noise + loss_rec_cond * self.lambda_
+            loss = loss_noise + loss_rec_cond * self.rec_weight
             self.log("loss_recons", loss_rec_cond)
         else:
             loss = loss_noise
             
         return loss
+    
+    
+    def test_step(self, batch:List[torch.Tensor], batch_idx:int) -> List[torch.Tensor]:
+        """
+        Test step of the model.
+
+        Args:
+            batch (List[torch.Tensor]): list containing the following tensors:
+                                        - tensor_data: tensor of shape (B, C, T, V) containing the input sequences
+                                        - transformation_idx
+                                        - metadata
+                                        - actual_frames
+            batch_idx (int): index of the batch
+
+        Returns:
+            List[torch.Tensor]: [predicted poses and the loss, tensor_data, transformation_idx, metadata, actual_frames]
+        """
+        
+        return self.forward(batch)
+    
+    
+    def test_epoch_end(self, test_step_outputs:List[List[torch.Tensor]]) -> float:
+        """
+        Test epoch end of the model.
+
+        Args:
+            test_step_outputs (List[torch.Tensor]): list containing the output of the model and the input data
+
+        Returns:
+            float: test auc score
+        """
+        
+        out, gt_data, trans, meta, frames = processing_data(test_step_outputs)
+        return self.post_processing(out, gt_data, trans, meta, frames)
     
     
     def validation_step(self, batch:List[torch.Tensor], batch_idx:int) -> List[torch.Tensor]:
@@ -289,7 +320,6 @@ class MoCoDAD(pl.LightningModule):
         scene_clips = [(int(fn.split('_')[0]), int(fn.split('_')[1].split('.')[0])) for fn in all_gts]
 
         num_transform = self.num_transforms
-        smoothing = self.smoothing
         model_scores_transf = {}
         dataset_gt_transf = {}
 
@@ -340,7 +370,7 @@ class MoCoDAD(pl.LightningModule):
                     clip_score = clip_score[np.array(masked_clips[clip_idx])==1]
                     gt = gt[np.array(masked_clips[clip_idx])==1]
 
-                clip_score = score_process(clip_score, win_size=smoothing, dataname=self.dataset_name, use_scaler=False)
+                clip_score = score_process(clip_score)
                 model_scores.append(clip_score)
                 dataset_gt.append(gt)
                     
@@ -478,9 +508,9 @@ class MoCoDAD(pl.LightningModule):
             int: number of joints
         """
         
-        if args.dataset_headless:
+        if args.headless:
             joints_to_consider = 14
-        elif args.dataset_kp18_format:
+        elif args.kp18_format:
             joints_to_consider = 18
         else:
             joints_to_consider = 17
