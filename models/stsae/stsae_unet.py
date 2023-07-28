@@ -382,14 +382,13 @@ class STSAE_Unet(STSE_Unet):
         return fd1
     
         
-    def forward(self, X:torch.Tensor, t:torch.Tensor, pst:torch.Tensor=None, condition_data:torch.Tensor=None) -> Tuple[torch.Tensor, List]:
+    def forward(self, X:torch.Tensor, t:torch.Tensor, condition_data:torch.Tensor=None) -> Tuple[torch.Tensor, List]:
         """
         Forward pass of the model.
 
         Args:
             X (torch.Tensor): input tensor of shape [batch_size, input_channels, n_frames, n_joints]
             t (torch.Tensor): time step
-            pst (torch.Tensor, optional): conditioning data. Defaults to None.
             condition_data (torch.Tensor, optional): conditioning data. Defaults to None.
 
         Returns:
@@ -406,8 +405,8 @@ class STSAE_Unet(STSE_Unet):
             t = t + condition_data
         
         # Concatenate the conditioning signal
-        if self.concat_condition:
-            X = torch.cat([pst,X], dim=2)
+        elif self.concat_condition:
+            X = torch.cat([condition_data, X], dim=2)
         
         fd1, d1, d2 = self._downscale(X, t)
 
