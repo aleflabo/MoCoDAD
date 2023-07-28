@@ -77,7 +77,7 @@ class STSE(nn.Module):
         X = X.view(N * M, V, C, T).permute(0,2,3,1).contiguous()
             
         # Encode the input pose sequence
-        X = self.encoder(X, t)
+        X, _ = self.encoder(X, t)
         N, C, T, V = X.size()
         X = X.view([N, -1]).contiguous()
         X = X.view(N, M, self.h_dim, T, V).permute(0, 2, 3, 4, 1)
