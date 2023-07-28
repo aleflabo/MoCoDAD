@@ -2,7 +2,7 @@ from typing import List, Tuple, Union
 
 import torch
 import torch.nn as nn
-from models.gcae.stsgcn_diffusion_unet import CNN_layer, ST_GCNN_layer
+from models.gcae.stsgcn import CNN_layer, ST_GCNN_layer
 
 
 class STSE_Unet(nn.Module):
@@ -276,7 +276,7 @@ class STSAE_Unet(STSE_Unet):
         self.build_model()
         
         
-    def build_model(self) -> None:
+    def build_model(self, set_out_layer:bool=False) -> None:
         """
         Build the upscaling part of the model. The downscaling part is built by the parent class.
         """
