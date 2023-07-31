@@ -15,7 +15,7 @@ from torch.optim import Adam
 from tqdm import tqdm
 from utils.diffusion_utils import Diffusion
 from utils.eval_utils import (compute_var_matrix, filter_vectors_by_cond,
-                              get_avenue_mask, pad_scores, score_process)
+                              get_avenue_mask, get_hr_ubnormal_mask, pad_scores, score_process)
 from utils.model_utils import processing_data
 
 
@@ -71,6 +71,10 @@ class MoCoDAD(pl.LightningModule):
         self.n_generated_samples = args.n_generated_samples
         self.model_return_value = args.model_return_value
         self.gt_path = args.gt_path
+        self.split = args.split
+        self.use_hr = args.use_hr
+        self.ckpt_dir = args.ckpt_dir
+        self.save_tensors = args.save_tensors
         self.num_transforms = args.num_transform
         self.pad_size = args.pad_size
         self.dataset_name = args.dataset_choice
@@ -250,6 +254,10 @@ class MoCoDAD(pl.LightningModule):
         """
         
         out, gt_data, trans, meta, frames = processing_data(test_step_outputs)
+        if self.save_tensors:
+            tensors = {'prediction':out, 'gt_data':gt_data, 
+                       'trans':trans, 'metadata':meta, 'frames':frames}
+            self._save_tensors(tensors, split_name=self.split, aggr_strategy=self.aggregation_strategy, n_gen=self.n_generated_samples)
         return self.post_processing(out, gt_data, trans, meta, frames)
     
     
@@ -284,6 +292,10 @@ class MoCoDAD(pl.LightningModule):
         """
         
         out, gt_data, trans, meta, frames = processing_data(validation_step_outputs)
+        if self.save_tensors:
+            tensors = {'prediction':out, 'gt_data':gt_data, 
+                       'trans':trans, 'metadata':meta, 'frames':frames}
+            self._save_tensors(tensors, split_name=self.split, aggr_strategy=self.aggregation_strategy, n_gen=self.n_generated_samples)
         return self.post_processing(out, gt_data, trans, meta, frames)
 
     
@@ -312,7 +324,7 @@ class MoCoDAD(pl.LightningModule):
             frames (np.ndarray): frame indexes of the data
 
         Returns:
-            float: validation auc score
+            float: auc score
         """
         
         all_gts = [file_name for file_name in os.listdir(self.gt_path) if file_name.endswith('.npy')]
@@ -341,7 +353,7 @@ class MoCoDAD(pl.LightningModule):
                 
                 cond_scene_clip = (meta_transform[:, 0] == scene_idx) & (meta_transform[:, 1] == clip_idx)
                 out_scene_clip, gt_scene_clip, meta_scene_clip, frames_scene_clip = filter_vectors_by_cond([out_transform, gt_data_transform, 
-                                                                                                            meta_transform, frames_transform], 
+                                                                                                           meta_transform, frames_transform], 
                                                                                                            cond_scene_clip) 
                 
                 figs_ids = sorted(list(set(meta_scene_clip[:, 2])))
@@ -351,7 +363,7 @@ class MoCoDAD(pl.LightningModule):
                     # iterating over each actor A in each clip C with transformation T
 
                     cond_fig = (meta_scene_clip[:, 2] == fig)
-                    out_fig, gt_fig, frames_fig = filter_vectors_by_cond([out_scene_clip, gt_scene_clip, frames_scene_clip], cond_fig) 
+                    out_fig, _, frames_fig = filter_vectors_by_cond([out_scene_clip, gt_scene_clip, frames_scene_clip], cond_fig) 
 
                     loss_matrix = compute_var_matrix(out_fig, frames_fig, n_frames)
                     loss_matrix = np.where(loss_matrix == 0.0, np.nan, loss_matrix)
@@ -362,7 +374,13 @@ class MoCoDAD(pl.LightningModule):
                     
                     error_per_person.append(fig_reconstruction_loss)
 
-                clip_score = np.amax(np.stack(error_per_person, axis=0), axis=0)
+                clip_score = np.mean(np.stack(error_per_person, axis=0), axis=0)
+                
+                if self.use_hr:
+                    hr_ubnormal_masked_clips = get_hr_ubnormal_mask(self.split)
+                    if (scene_idx, clip_idx) in hr_ubnormal_masked_clips:
+                        clip_score = clip_score[hr_ubnormal_masked_clips[(scene_idx, clip_idx)]]
+                        gt = gt[hr_ubnormal_masked_clips[(scene_idx, clip_idx)]]
                 
                 # removing the non-HR frames for Avenue dataset
                 masked_clips = get_avenue_mask()
@@ -386,9 +404,26 @@ class MoCoDAD(pl.LightningModule):
         
         # computing the AUC
         auc = roc_auc_score(gt,pds)
-        self.log('validation_auc', auc)
+        self.log('AUC', auc)
         
         return auc
+    
+    
+    def test_on_saved_tensors(self, split_name:str) -> float:
+        """
+        Skip the prediction step and test the model on the saved tensors.
+
+        Args:
+            split_name (str): split name (val, test)
+
+        Returns:
+            float: auc score
+        """
+        
+        tensors = self._load_tensors(split_name, self.aggregation_strategy, self.n_generated_samples)
+        return self.post_processing(tensors['prediction'], tensors['gt_data'], tensors['trans'],
+                                    tensors['metadata'], tensors['frames'])
+        
     
     
     ## Helper functions
@@ -517,6 +552,17 @@ class MoCoDAD(pl.LightningModule):
         return joints_to_consider
     
     
+    def _load_tensors(self, split_name:str, aggr_strategy:str, n_gen:int) -> Dict[str, torch.Tensor]:
+        name = 'saved_tensors_{}_{}_{}'.format(split_name, aggr_strategy, n_gen)
+        path = os.path.join(self.ckpt_dir, name)
+        tensor_files = os.listdir(path)
+        tensors = {}
+        for t_file in tensor_files:
+            t_name = t_file.split('.')[0]
+            tensors[t_name] = torch.load(os.path.join(path, t_file))
+        return tensors
+    
+    
     def _pack_out_data(self, selected_x:torch.Tensor, loss_of_selected_x:torch.Tensor, additional_out:List[torch.Tensor], return_:str) -> List[torch.Tensor]:
         """
         Packs the output data according to the return_ argument.
@@ -563,6 +609,25 @@ class MoCoDAD(pl.LightningModule):
         """
         
         return self.model.pos_encoding(t, channels)
+    
+    
+    def _save_tensors(self, tensors:Dict[str, torch.Tensor], split_name:str, aggr_strategy:str, n_gen:int) -> None:
+        """
+        Saves the tensors in the experiment directory.
+
+        Args:
+            tensors (Dict[str, torch.Tensor]): tensors to save
+            split_name (str): name of the split (val, test)
+            aggr_strategy (str): aggregation strategy
+            n_gen (int): number of generated samples
+        """
+        
+        name = 'saved_tensors_{}_{}_{}'.format(split_name, aggr_strategy, n_gen)
+        path = os.path.join(self.ckpt_dir, name)
+        if not os.path.exists(path):
+            os.mkdir(path)
+        for t_name, tensor in tensors.items():
+            torch.save(tensor, os.path.join(path, t_name+'.pt'))
     
     
     def _select_frames(self, data:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor]]:
