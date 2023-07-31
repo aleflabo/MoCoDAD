@@ -7,6 +7,7 @@ import torch
 from scipy.ndimage import gaussian_filter1d
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.preprocessing import MinMaxScaler
+from typing import List, Dict
     
 
 def compute_fig_matrix(pos, frames_pos, n_frames):
@@ -149,7 +150,7 @@ def pad_scores(fig_reconstruction_loss, gt, pad_size):
         return fig_reconstruction_loss
     
     
-def get_avenue_mask():
+def get_avenue_mask() -> Dict[int, List[int]]:
     V_01 = [1] * 75 + [0] * 46 + [1] * 269 + [0] * 47 + [1] * 427 + [0] * 47 + [1] * 20 + [0] * 70 + [1] * 438  # 1439 Frames
     V_02 = [1] * 272 + [0] * 48 + [1] * 403 + [0] * 41 + [1] * 447  # 1211 Frames
     V_03 = [1] * 293 + [0] * 48 + [1] * 582  # 923 Frames
@@ -166,8 +167,9 @@ def get_avenue_mask():
     return masked_clips
 
 
-def get_hr_ubnormal_mask(path_to_boolean_masks):
+def get_hr_ubnormal_mask(split:str):
     
+    path_to_boolean_masks = f'./data/UBnormal/hr_bool_masks/{split}/test_frame_mask/*'
     hr_boolean_masks = glob(path_to_boolean_masks)
     hr_ubnormal_masked_clips = {}
     
