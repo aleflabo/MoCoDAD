@@ -8,6 +8,8 @@ import utils.tools as tools
 from utils.get_robust_data import data_of_combined_model
 from utils.dataset_utils import keypoints17_to_coco18, normalize_pose, normalize_pose_bbox, normalize_pose_robust, gen_clip_seg_data_np, ae_trans_list, normalize_pose_stan
 import random
+
+
 class PoseDataset(Dataset):
     def __init__(self, path_to_json_dir,
                  transform_list=None,
@@ -206,20 +208,19 @@ class PoseDatasetRobust(PoseDataset):
     """
     """
     
-    def __init__(self, path_to_robust_data, include_global=False, split='train', exp_dir='',
+    def __init__(self, path_to_data, include_global=False, split='train', exp_dir='',
                  transform_list=None,
                  return_indices=False, return_metadata=False,
                  debug=False, dataset_clips=None,
                  **dataset_args):
         
         dataset_args['return_mean'] = False
-        self.path_to_robust_data = path_to_robust_data
         self.include_global = include_global
 
         self.dataset_split = split
         self.exp_dir = exp_dir
 
-        super(PoseDatasetRobust, self).__init__(path_to_robust_data,
+        super(PoseDatasetRobust, self).__init__(path_to_data,
                                                 transform_list,
                                                 return_indices, return_metadata,
                                                 debug, dataset_clips,
@@ -229,7 +230,7 @@ class PoseDatasetRobust(PoseDataset):
         
     def gen_dataset(self, ret_keys=False, **dataset_args):
         
-        global_, local_ = data_of_combined_model(trajectories_path=self.path_to_robust_data, 
+        global_, local_ = data_of_combined_model(trajectories_path=self.path_to_json, 
                                                  split=self.dataset_split, seg_len=self.seg_len, 
                                                  seg_stride=self.seg_stride,
                                                  vid_res=self.vid_res,
@@ -242,11 +243,6 @@ class PoseDatasetRobust(PoseDataset):
         X_global, _ = global_
         X_local, X_local_meta = local_ # X_local has shape (number of segments, window lenght, 34)
 
-        # segs_data_np_without_conf = np.load(os.path.join(self.path_to_robust_data, f'X_{self.type_to_load}_{self.dataset_split}.npy'))
-        
-        # with open(os.path.join(self.path_to_robust_data, 'metadata', f'X_{self.type_to_load}_meta_{self.dataset_split}.txt'), 'r') as meta_file:
-        #     metadata = meta_file.readlines()
-            
         segs_meta, segs_ids = X_local_meta
         person_keys = dict()
         
@@ -300,18 +296,18 @@ def get_dataset_and_loader(args, split='train', validation=False):
     else: scaler = None 
     
     dataset_args = {'transform_list': trans_list, 'debug': args.debug, 'headless': args.headless,
-                    'seg_len': args.seg_len, 'normalize_pose': args.normalize_pose, 'kp18_format': args.kp18_format,
-                    'vid_res': args.vid_res, 'num_coords': args.num_coords, 'sub_mean': args.sub_mean,
-                    'return_indices': False, 'return_metadata': True, 'return_mean': args.sub_mean,
+                    'seg_len': args.seg_len, 'normalize_pose': (args.normalization_strategy != 'none'), 'kp18_format': args.kp18_format,
+                    'vid_res': args.vid_res, 'num_coords': args.num_coords, 'sub_mean': False,
+                    'return_indices': False, 'return_metadata': True, 'return_mean': False,
                     'symm_range': args.symm_range, 'hip_center': args.hip_center, 
                     'normalization_strategy': args.normalization_strategy, 'ckpt': args.ckpt_dir, 'scaler': scaler, 
-                    'kp_threshold':args.kp_th, 'double_item': args.double_item}
+                    'kp_threshold': 0, 'double_item': False}
 
     loader_args = {'batch_size': args.batch_size, 'num_workers': args.num_workers, 'pin_memory': True}
     
     dataset_args['seg_stride'] = args.seg_stride if split == 'train' else 1  # No strides for test set
     if args.normalization_strategy=='robust': 
-        dataset = PoseDatasetRobust(path_to_robust_data=args.path_to_robust, 
+        dataset = PoseDatasetRobust(path_to_data=args.data_dir, 
                                     exp_dir=args.exp_dir,
                                     include_global=(args.num_coords==6), split=split, **dataset_args)
     else:
@@ -320,18 +316,16 @@ def get_dataset_and_loader(args, split='train', validation=False):
     loader = DataLoader(dataset, **loader_args, shuffle=(split == 'train'))
     if validation:
         dataset_args['seg_stride'] = 1
-        # dataset_args['vid_res'] = [1080,720]
-        # val_dataset = PoseDatasetRobust(path_to_robust_data=args.path_to_robust, 
-        #                                 exp_dir=args.exp_dir,
-        #                                 include_global=(args.num_coords==6), split='validation', **dataset_args)
         if args.normalization_strategy=='robust': 
-            val_dataset = PoseDatasetRobust(path_to_robust_data=args.path_to_robust, 
-                                    exp_dir=args.exp_dir,
+            val_dataset = PoseDatasetRobust(path_to_data=args.path_to_robust, 
+                                    exp_dir=args.ckpt_dir,
                                     include_global=(args.num_coords==6), split='validation', **dataset_args)
         else:
             val_dataset = PoseDataset(args.pose_path['validation'], **dataset_args)
             
         val_loader = DataLoader(val_dataset, **loader_args, shuffle=False)
-        return dataset, loader, val_dataset, val_loader
+    else:
+        val_dataset, val_loader = None, None
     
-    return dataset, loader
+    return dataset, loader, val_dataset, val_loader
+    
