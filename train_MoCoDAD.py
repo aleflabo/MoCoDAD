@@ -6,7 +6,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import yaml
-from models.diffusion_STS import MoCoDAD
+from models.mocodad import MoCoDAD
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import DDPStrategy

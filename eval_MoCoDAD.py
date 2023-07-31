@@ -3,7 +3,7 @@ import os
 
 import pytorch_lightning as pl
 import yaml
-from models.diffusion_STS import MoCoDAD
+from models.mocodad import MoCoDAD
 from utils.argparser import init_args
 from utils.dataset import get_dataset_and_loader
 
