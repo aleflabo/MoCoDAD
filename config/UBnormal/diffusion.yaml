@@ -1,108 +1,98 @@
-### Environment configuration
+### Experiment configuration
+
+## General settings
 split: 'train' # data split; choices ['train', 'test']
-  
-accelerator: 'gpu'
-device: 'cuda' # device to use; choices ['cuda', 'cpu']
-
+debug: True
 seed: 999
-data_dir: 'path_to_data/UBnormal'
-exp_dir: './checkpoints'
-
-num_coords: 2
-create_experiment_dir: True
-test_path: 'path_to_data/UBnormal/validating/test_frame_mask'
-load_ckpt: ''
 validation: True # use validation
-
-###################################################################################################################
-
-debug: False
-devices: [0,1] # indices of cuda devices to use
-dir_name: 'exp_name'
-rec_weight: 1
-ae: True
-
-# Motion-Condition settings (inject achieved the best results)
-inject_condition: True
-concat_condition: False
-no_condition: False
-interleave : True
-
-
-indices: [0,1,2] # indexes to be used as condition. Don't pass -1, pass the actual last index instead 
-num_random_indices: 0
-
-noise_steps: 10 # how many diffusion steps to perform
-
-channels: [32,16,32] # channels for the encoder
-h_dim: 32 # dimension of the bottleneck at the end of the encoder
-latent_dim: 16 # dimension of the latent space
-emb_dim: 16 # use latent_dim
-load_tensors: False 
-
-####################################################################################################################
 use_hr: False # just for test
 
-pretrained: False
-dropout: 0 # probability of dropout
-conv_oper: 'sagc'
-act: 'relu' # activation function
-pad_size: -1 # size of the padding 
+## Computational resources
+accelerator: 'gpu'
+devices: [0,] # indices of cuda devices to use
 
+## Paths
+dir_name: 'test'
+data_dir: './data/UBnormal/'
+exp_dir: './checkpoints'
+test_path: './data/UBnormal/testing'
+create_experiment_dir: True
+load_ckpt: 'best_weights.ckpt'
 
-### Hyperparameters for the losses
-alpha: 0.000001 # weight of the regularisation term
-lambda_: 0.01 # weight of the reconstruction loss
-
-### Dataset's configuration
-dataset_path_to_robust: 'path_to_data/morais/UBnormal'
-dataset_headless: False
-dataset_choice: 'UBnormal'
-dataset_seg_len: 6 # length of the window (cond+noised) 
-
-true_every: 7 ####Interleaving : (data_seg_len-1)%true_every == 0 # ignored if indices != [] #deprecated use dataset_seg_len and indices instead
-
-dataset_seg_stride: 1
-dataset_start_offset: 0
-dataset_num_transform: 5
-dataset_symm_range: True
-dataset_return_indices: False
-dataset_sub_mean: False
-dataset_vid_res: [1080,720]
-dataset_normalize_pose: True
-dataset_kp18_format: False
-dataset_batch_size: 1024
-dataset_hip_center: False
-dataset_num_workers: 8
-dataset_normalization_strategy: 'robust' # use 'none' to avoid normalization, 'robust' otherwise
-dataset_use_fitted_scaler: False
-dataset_kp_th: 0
-dataset_seg_th: 0
-dataset_double_item: False
-
-
-### ae args
-ae_act: 'relu'
-ae_fn: ''
-ae_test_every: 20
-ae_epochs: 100
-
-
-### Optimizer and scheduler's configuration
-opt_optimizer: 'adam'
-opt_scheduler: 'tri'
-opt_lr: 0.001
-opt_lr_decay: 0.99
-opt_weight_decay: 0.00001
-
-
-### WANDB configuration
-use_wandb: True
+## WANDB configuration
+use_wandb: False
 project_name: "project_name"
 wandb_entity: "entity_name"
 group_name: "group_name"
+use_ema: False
 
 
-### Post-processing configuration
-smoothing: 50
+##############################
 
+
+### Model's configuration
+
+## U-Net's configuration
+device: 'cuda' # device to use; choices ['cuda', 'cpu']
+embedding_dim: 16 # use latent_dim
+dropout: 0 # probability of dropout
+conditioning_strategy: 'inject' # choices ['inject' (add2layers), 'concat' (cat), 'inbetween_imp' (interleave), 'random_imp' (random_indices), 'no_condition' (none)]
+
+## Conditioning network's configuration
+conditioning_architecture: 'AE' # choices ['AE', 'E', 'E_unet']
+conditioning_indices: [0,1,2] # indices to be used as condition. Don't pass -1, pass the actual last index instead. 
+                              # If an int is given, it will be used as the number of random indices that will be selected
+h_dim: 32 # dimension of the bottleneck at the end of the encoder
+latent_dim: 16 # dimension of the latent space
+channels: [32,16,32] # channels for the encoder
+
+##############################
+
+
+### Training's configuration
+
+## Diffusion's configuration
+noise_steps: 10 # how many diffusion steps to perform
+
+### Optimizer and scheduler's configuration
+n_epochs: 100
+opt_lr: 0.001
+
+## Losses' configuration
+loss_fn: 'smooth_l1' # loss function; choices ['mse', 'l1', 'smooth_l1']
+rec_weight: 0.01 # weight of the reconstruction loss
+
+##############################
+
+
+### Inference's configuration
+n_generated_samples: 5 # number of samples to generate
+model_return_value: 'loss'
+aggregation_strategy: 'best'
+save_tensors: True
+load_tensors: True 
+pad_size: -1 # size of the padding 
+
+
+### Dataset's configuration
+
+## Important parameters
+dataset_choice: 'UBnormal'
+seg_len: 6 # length of the window (cond+noised) 
+vid_res: [1080,720]
+batch_size: 1024
+
+## Other parameters
+headless: False
+hip_center: False
+kp18_format: False
+normalization_strategy: 'robust' # use 'none' to avoid normalization, 'robust' otherwise
+num_coords: 2
+num_transform: 5
+num_workers: 8
+path_to_robust: './data/UBnormal/'
+seg_stride: 1
+seg_th: 0
+start_offset: 0
+symm_range: True
+use_fitted_scaler: False
