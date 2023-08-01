@@ -110,10 +110,10 @@ class ST_GCNN_layer(nn.Module):
         X = self.prelu(X)
         
         if (self.emb_dim is not None) and (t is not None):
-            emb = self.emb_layer(t)[:, :, None, None].repeat(1, 1, X.shape[-2], X.shape[-1])
+            emb = self.emb_layer(t)[:, :, None, None].repeat(1, 1, X.shape[-2], X.shape[-1]).contiguous()
             return X + emb
         else:
-            return X
+            return X.contiguous()
 
 
 
@@ -151,8 +151,8 @@ class ConvTemporalGraphical(nn.Module):
             torch.Tensor: output tensor of shape [batch_size, in_channels, time_dim, joints_dim]
         """
         
-        X = torch.einsum('nctv,vtq->ncqv', (X, self.T))
-        X = torch.einsum('nctv,tvw->nctw', (X, self.A))
+        X = torch.einsum('nctv,vtq->ncqv', (X, self.T)).contiguous()
+        X = torch.einsum('nctv,tvw->nctw', (X, self.A)).contiguous()
         return X.contiguous() 
 
 

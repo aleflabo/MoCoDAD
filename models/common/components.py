@@ -194,6 +194,6 @@ class DecoderResiduals(Decoder):
             out_X = layer(X, t)
             X = out_X + residuals.pop()
 
-        X = self.out(X.permute(0, 1, 3, 2)).permute(0, 1, 3, 2)
+        X = self.out(X.permute(0, 1, 3, 2).contiguous()).permute(0, 1, 3, 2).contiguous()
 
         return X

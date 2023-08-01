@@ -80,9 +80,9 @@ class STSE(nn.Module):
         X, _ = self.encoder(X, t)
         N, C, T, V = X.size()
         X = X.view([N, -1]).contiguous()
-        X = X.view(N, M, self.h_dim, T, V).permute(0, 2, 3, 4, 1)
+        X = X.view(N, M, self.h_dim, T, V).permute(0, 2, 3, 4, 1).contiguous()
         X_shape = X.size()
-        X = X.view(N, -1) 
+        X = X.view(N, -1).contiguous()
         
         # Apply the bottleneck layer
         X = self.btlnk(X)
@@ -163,7 +163,7 @@ class STSAE(STSE):
         N, C, T, V, M = input_shape
         Z = Z.view(input_shape).contiguous()
         Z = Z.permute(0, 4, 1, 2, 3).contiguous()
-        Z = Z.view(N * M, C, T, V)
+        Z = Z.view(N * M, C, T, V).contiguous()
 
         Z = self.decoder(Z)
         

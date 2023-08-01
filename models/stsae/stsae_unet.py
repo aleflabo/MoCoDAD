@@ -201,7 +201,7 @@ class STSE_Unet(nn.Module):
             
         # Downscale the joints dimension
         d1 = fd1
-        fd1 = self.down1(fd1.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+        fd1 = self.down1(fd1.permute(0, 3, 1, 2).contiguous()).permute(0, 2, 3, 1).contiguous()
            
         # Apply the graph convolution on the coordinates dimension
         for gcn in self.st_gcnnsd2:
@@ -209,7 +209,7 @@ class STSE_Unet(nn.Module):
 
         # Downscale the joints dimension
         d2 = fd1
-        fd1 = self.down2(fd1.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+        fd1 = self.down2(fd1.permute(0, 3, 1, 2).contiguous()).permute(0, 2, 3, 1).contiguous()
           
         # Apply the graph convolution on the coordinates dimension
         for gcn in self.st_gcnnsd3:
@@ -357,7 +357,7 @@ class STSAE_Unet(STSE_Unet):
         """
         
         # Upscale the joints dimension
-        fd1 = self.up3(fd1.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+        fd1 = self.up3(fd1.permute(0, 3, 1, 2).contiguous()).permute(0, 2, 3, 1).contiguous()
         
         # Add residuals
         fd1 = fd1 + d2
@@ -367,7 +367,7 @@ class STSAE_Unet(STSE_Unet):
             fd1 = gcn(fd1,t)
 
         # Upscale the joints dimension
-        fd1 = self.up2(fd1.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+        fd1 = self.up2(fd1.permute(0, 3, 1, 2).contiguous()).permute(0, 2, 3, 1).contiguous()
 
         # Add residuals
         fd1 = fd1 + d1
