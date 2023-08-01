@@ -206,7 +206,7 @@ class MoCoDAD(pl.LightningModule):
         condition_embedding, rec_cond_data = self._encode_condition(condition_data)
         # Sample the time steps and currupt the data
         t = self.noise_scheduler.sample_timesteps(corrupt_data.shape[0]).to(self.device_)
-        x_t, noise = self.noise_scheduler.noise_graph(corrupt_data, t.to(corrupt_data.get_device())) 
+        x_t, noise = self.noise_scheduler.noise_graph(corrupt_data, t) 
         # Predict the noise
         predicted_noise = self._unet_forward(x_t, t=t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
         # Compute the loss
@@ -223,9 +223,10 @@ class MoCoDAD(pl.LightningModule):
         return loss
     
     
-    def test_step(self, batch:List[torch.Tensor], batch_idx:int) -> List[torch.Tensor]:
+    def test_step(self, batch:List[torch.Tensor], batch_idx:int) -> None:
         """
-        Test step of the model.
+        Test step of the model. It saves the output of the model and the input data as 
+        List[torch.Tensor]: [predicted poses and the loss, tensor_data, transformation_idx, metadata, actual_frames]
 
         Args:
             batch (List[torch.Tensor]): list containing the following tensors:
@@ -234,26 +235,32 @@ class MoCoDAD(pl.LightningModule):
                                         - metadata
                                         - actual_frames
             batch_idx (int): index of the batch
-
-        Returns:
-            List[torch.Tensor]: [predicted poses and the loss, tensor_data, transformation_idx, metadata, actual_frames]
         """
         
-        return self.forward(batch)
+        self._test_output_list.append(self.forward(batch))
+        return
     
     
-    def test_epoch_end(self, test_step_outputs:List[List[torch.Tensor]]) -> float:
+    def on_test_epoch_start(self) -> None:
+        """
+        Called when the test epoch begins.
+        """
+        
+        super().on_test_epoch_start()
+        self._test_output_list = []
+        return
+    
+    
+    def on_test_epoch_end(self) -> float:
         """
         Test epoch end of the model.
-
-        Args:
-            test_step_outputs (List[torch.Tensor]): list containing the output of the model and the input data
 
         Returns:
             float: test auc score
         """
         
-        out, gt_data, trans, meta, frames = processing_data(test_step_outputs)
+        out, gt_data, trans, meta, frames = processing_data(self._test_output_list)
+        del self._test_output_list
         if self.save_tensors:
             tensors = {'prediction':out, 'gt_data':gt_data, 
                        'trans':trans, 'metadata':meta, 'frames':frames}
@@ -261,9 +268,10 @@ class MoCoDAD(pl.LightningModule):
         return self.post_processing(out, gt_data, trans, meta, frames)
     
     
-    def validation_step(self, batch:List[torch.Tensor], batch_idx:int) -> List[torch.Tensor]:
+    def validation_step(self, batch:List[torch.Tensor], batch_idx:int) -> None:
         """
-        Validation step of the model.
+        Validation step of the model. It saves the output of the model and the input data as 
+        List[torch.Tensor]: [predicted poses and the loss, tensor_data, transformation_idx, metadata, actual_frames]
 
         Args:
             batch (List[torch.Tensor]): list containing the following tensors:
@@ -272,26 +280,32 @@ class MoCoDAD(pl.LightningModule):
                                         - metadata
                                         - actual_frames
             batch_idx (int): index of the batch
-
-        Returns:
-            List[torch.Tensor]: [predicted poses and the loss, tensor_data, transformation_idx, metadata, actual_frames]
         """
         
-        return self.forward(batch)
+        self._validation_output_list.append(self.forward(batch))
+        return
+    
+    
+    def on_validation_epoch_start(self) -> None:
+        """
+        Called when the test epoch begins.
+        """
+        
+        super().on_validation_epoch_start()
+        self._validation_output_list = []
+        return
 
 
-    def validation_epoch_end(self, validation_step_outputs:List[torch.Tensor]) -> float:
+    def on_validation_epoch_end(self) -> float:
         """
         Validation epoch end of the model.
-
-        Args:
-            validation_step_outputs (List[torch.Tensor]): list containing the output of the model and the input data
 
         Returns:
             float: validation auc score
         """
         
-        out, gt_data, trans, meta, frames = processing_data(validation_step_outputs)
+        out, gt_data, trans, meta, frames = processing_data(self._validation_output_list)
+        del self._validation_output_list
         if self.save_tensors:
             tensors = {'prediction':out, 'gt_data':gt_data, 
                        'trans':trans, 'metadata':meta, 'frames':frames}

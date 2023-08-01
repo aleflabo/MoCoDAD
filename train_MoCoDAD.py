@@ -56,11 +56,10 @@ if __name__== '__main__':
     
     # Initialize model and trainer
     model = MoCoDAD(args)
-        
-    trainer = pl.Trainer.from_argparse_args(args, default_root_dir=args.ckpt_dir, 
-                        logger=wandb_logger, log_every_n_steps=20, max_epochs=args.n_epochs,
-                        callbacks=callbacks, val_check_interval=1., num_sanity_val_steps=0, 
-                        strategy=DDPStrategy(find_unused_parameters=False), deterministic=True)
+    
+    trainer = pl.Trainer(accelerator=args.accelerator, devices=args.devices, default_root_dir=args.ckpt_dir, max_epochs=args.n_epochs, 
+                         logger=wandb_logger, callbacks=callbacks, strategy=DDPStrategy(find_unused_parameters=False), 
+                         log_every_n_steps=20, num_sanity_val_steps=0, deterministic=True)
     
     # Train the model    
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
