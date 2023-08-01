@@ -1,0 +1,108 @@
+### Experiment configuration
+
+## General settings
+split: 'train' # data split; choices ['train', 'test']
+debug: false # if true, load only a few data samples
+seed: 999
+validation: true # use validation; only for UBnormal
+use_hr: false # for validation and test on UBnormal
+
+## Computational resources
+accelerator: 'gpu'
+devices: [0,] # indices of cuda devices to use
+
+## Paths
+dir_name: '' # name of the directory of the current experiment
+data_dir: './data/UBnormal/' # path to the data
+exp_dir: './checkpoints' # path to the directory that will contain the current experiment directory
+test_path: './data/UBnormal/testing' # path to the test data
+load_ckpt: 'best_weights.ckpt' # name of the checkpoint to load at inference time
+create_experiment_dir: true
+
+## WANDB configuration
+use_wandb: false
+project_name: "project_name"
+wandb_entity: "entity_name"
+group_name: "group_name"
+use_ema: false
+
+##############################
+
+
+### Model's configuration
+
+## U-Net's configuration
+device: 'cuda' # device to use; choices ['cuda', 'cpu']
+embedding_dim: 16 # dimension of the embedding of the UNet
+dropout: 0. # probability of dropout
+conditioning_strategy: 'inject' # choices ['inject' (add2layers), 'concat' (cat), 'inbetween_imp' (interleave), 'random_imp' (random_indices), 'no_condition' (none)]
+
+## Conditioning network's configuration
+conditioning_architecture: 'AE' # choices ['AE', 'E', 'E_unet']
+conditioning_indices: [0,1,2] # If conditioning_strategy=random_imp, it must be int and it is used as the number of random indices that will be selected
+                              # If an int is given and conditioning_strategy=[inject|concat], n_frames//conditioning_indices will be used as the number of conditioning indices
+                              # If a list is given, it will be used as the conditioning indices 
+h_dim: 32 # dimension of the bottleneck at the end of the encoder of the conditioning network
+latent_dim: 16 # dimension of the latent space of the conditioning encoder
+channels: [32,16,32] # channels for the encoder
+
+##############################
+
+
+### Training's configuration
+
+## Diffusion's configuration
+noise_steps: 10 # how many diffusion steps to perform
+
+### Optimizer and scheduler's configuration
+n_epochs: 100
+opt_lr: 0.001
+
+## Losses' configuration
+loss_fn: 'smooth_l1' # loss function; choices ['mse', 'l1', 'smooth_l1']
+rec_weight: 0.01 # weight of the reconstruction loss
+
+##############################
+
+
+### Inference's configuration
+n_generated_samples: 50 # number of samples to generate
+model_return_value: 'loss' # choices ['loss', 'poses', 'all']; if 'loss', the model will return the loss; 
+                           # if 'poses', the model will return the generated poses; 
+                           # if 'all', the model will return both the loss and the generated poses
+aggregation_strategy: 'best' # choices ['best', 'mean', 'median', 'random']; if 'best', the best sample will be selected; 
+                             # if 'mean', the mean of loss of the samples will be selected; 
+                             # if 'median', the median of the loss of the samples will be selected; 
+                             # if 'random', a random sample will be selected;
+                             # if 'mean_poses', the mean of the generated poses will be selected;
+                             # if 'median_poses', the median of the generated poses will be selected;
+                             # if 'all', all the generated poses will be selected
+save_tensors: false # if true, save the generated tensors for faster inference
+load_tensors: false # if true, load the generated tensors for faster inference
+
+##############################
+
+
+### Dataset's configuration
+
+## Important parameters
+dataset_choice: 'UBnormal'
+seg_len: 6 # length of the window (cond+noised) 
+vid_res: [1080,720]
+batch_size: 1024
+pad_size: -1 # size of the padding 
+
+## Other parameters
+headless: false # remove the keypoints of the head
+hip_center: false # center the keypoints on the hip
+kp18_format: false # use the 18 keypoints format
+normalization_strategy: 'robust' # use 'none' to avoid normalization, 'robust' otherwise
+num_coords: 2 # number of coordinates to use
+num_transform: 5 # number of transformations to apply
+num_workers: 8
+path_to_robust: './data/UBnormal/'
+seg_stride: 1
+seg_th: 0
+start_offset: 0
+symm_range: True
+use_fitted_scaler: false
