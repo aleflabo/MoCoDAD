@@ -27,12 +27,12 @@ class Diffusion:
         self.joints = n_joints
         self.device = device
         self.beta = self.schedule_noise()
-        self.alpha = 1. - self.beta
-        self.alpha_hat = torch.cumprod(self.alpha, dim=0)
+        self.alpha = (1. - self.beta).to(self.device)
+        self.alpha_hat = torch.cumprod(self.alpha, dim=0).to(self.device)
 
 
     def prepare_noise_schedule(self) -> torch.Tensor:
-        return torch.linspace(self.beta_start, self.beta_end, self.noise_steps)
+        return torch.linspace(self.beta_start, self.beta_end, self.noise_steps, device=self.device)
     
     
     def schedule_noise(self):
@@ -41,7 +41,7 @@ class Diffusion:
             lambda t: math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2,
         )
         
-        return torch.tensor(betas, dtype=torch.float32)
+        return torch.tensor(betas, dtype=torch.float32, device=self.device)
             
 
     def noise_images(self, x:torch.Tensor, t:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
