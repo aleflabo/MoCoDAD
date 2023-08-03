@@ -49,7 +49,7 @@ if __name__== '__main__':
         wandb_logger = WandbLogger(project=args.project_name, group=args.group_name, entity=args.wandb_entity, 
                                    name=args.dir_name, config=vars(args), log_model='all')
     else:
-        wandb_logger = None
+        wandb_logger = False
 
     # Get dataset and loaders
     _, train_loader, _, val_loader = get_dataset_and_loader(args, split=args.split, validation=args.validation)

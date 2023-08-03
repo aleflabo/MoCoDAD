@@ -2,21 +2,21 @@
 
 ## General settings
 split: 'train' # data split; choices ['train', 'test']
-debug: false # if true, load only a few data samples
+debug: true # if true, load only a few data samples
 seed: 999
 validation: true # use validation; only for UBnormal
 use_hr: false # for validation and test on UBnormal
 
 ## Computational resources
 accelerator: 'gpu'
-devices: [0,] # indices of cuda devices to use
+devices: [0,1] # indices of cuda devices to use
 
 ## Paths
-dir_name: '' # name of the directory of the current experiment
+dir_name: 'train_experiment' # name of the directory of the current experiment
 data_dir: './data/UBnormal/' # path to the data
 exp_dir: './checkpoints' # path to the directory that will contain the current experiment directory
-test_path: './data/UBnormal/testing' # path to the test data
-load_ckpt: 'best_weights.ckpt' # name of the checkpoint to load at inference time
+test_path: './data/UBnormal/validating' # path to the test data
+load_ckpt: '' # name of the checkpoint to load at inference time
 create_experiment_dir: true
 
 ## WANDB configuration
@@ -32,7 +32,6 @@ use_ema: false
 ### Model's configuration
 
 ## U-Net's configuration
-device: 'cuda' # device to use; choices ['cuda', 'cpu']
 embedding_dim: 16 # dimension of the embedding of the UNet
 dropout: 0. # probability of dropout
 conditioning_strategy: 'inject' # choices ['inject' (add2layers), 'concat' (cat), 'inbetween_imp' (interleave), 'random_imp' (random_indices), 'no_condition' (none)]
@@ -66,7 +65,7 @@ rec_weight: 0.01 # weight of the reconstruction loss
 
 
 ### Inference's configuration
-n_generated_samples: 50 # number of samples to generate
+n_generated_samples: 5 # number of samples to generate
 model_return_value: 'loss' # choices ['loss', 'poses', 'all']; if 'loss', the model will return the loss; 
                            # if 'poses', the model will return the generated poses; 
                            # if 'all', the model will return both the loss and the generated poses

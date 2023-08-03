@@ -27,10 +27,10 @@ class Diffusion:
         self.joints = n_joints
         self.device = device
         self.beta = self.schedule_noise()
-        self.alpha = (1. - self.beta).to(self.device)
-        self.alpha_hat = torch.cumprod(self.alpha, dim=0).to(self.device)
-
-
+        self.alpha = (1. - self.beta)
+        self.alpha_hat = torch.cumprod(self.alpha, dim=0)
+        
+    
     def prepare_noise_schedule(self) -> torch.Tensor:
         return torch.linspace(self.beta_start, self.beta_end, self.noise_steps, device=self.device)
     
@@ -45,26 +45,29 @@ class Diffusion:
             
 
     def noise_images(self, x:torch.Tensor, t:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        sqrt_alpha_hat = torch.sqrt(self.alpha_hat[t])[:, None, None, None]
-        sqrt_one_minus_alpha_hat = torch.sqrt(1 - self.alpha_hat[t])[:, None, None, None]
-        Ɛ = torch.randn_like(x)
+        device = t.get_device()
+        alpha_hat = self.alpha_hat.to(device)
+        sqrt_alpha_hat = torch.sqrt(alpha_hat[t])[:, None, None, None]
+        sqrt_one_minus_alpha_hat = torch.sqrt(1 - alpha_hat[t])[:, None, None, None]
+        Ɛ = torch.randn_like(x, device=device)
         return sqrt_alpha_hat * x + sqrt_one_minus_alpha_hat * Ɛ, Ɛ
     
 
     def noise_graph(self, x:torch.Tensor, t:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        alpha_hat = self.alpha_hat.to(t.get_device())
+        device = t.get_device()
+        alpha_hat = self.alpha_hat.to(device)
         sqrt_alpha_hat = torch.sqrt(alpha_hat[t])[:, None, None, None]
         sqrt_one_minus_alpha_hat = torch.sqrt(1 - alpha_hat[t])[:, None, None, None]
-        Ɛ = torch.randn_like(x, device=t.get_device())
-        
+        Ɛ = torch.randn_like(x, device=device)
         return sqrt_alpha_hat *x + sqrt_one_minus_alpha_hat * Ɛ, Ɛ
     
     
     def noise_latent(self, x:torch.Tensor, t:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        sqrt_alpha_hat = torch.sqrt(self.alpha_hat[t])[:,None].to(t.get_device())
-        sqrt_one_minus_alpha_hat = torch.sqrt(1 - self.alpha_hat[t])[:, None].to(t.get_device())
-        Ɛ = (torch.randn_like(x)).to(t.get_device())
-
+        device = t.get_device()
+        alpha_hat = self.alpha_hat.to(device)
+        sqrt_alpha_hat = torch.sqrt(alpha_hat[t])[:,None]
+        sqrt_one_minus_alpha_hat = torch.sqrt(1 - alpha_hat[t])[:, None]
+        Ɛ = torch.randn_like(x, device=device)
         return sqrt_alpha_hat *x + sqrt_one_minus_alpha_hat * Ɛ, Ɛ 
 
 

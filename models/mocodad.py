@@ -49,7 +49,6 @@ class MoCoDAD(pl.LightningModule):
         
         # Model parameters
         # Main network
-        self.device_ = args.device
         self.embedding_dim = args.embedding_dim 
         self.dropout = args.dropout
         self.conditioning_strategy = self.conditioning_strategies[args.conditioning_strategy]
@@ -101,17 +100,17 @@ class MoCoDAD(pl.LightningModule):
                 condition_encoder = STSAE(c_in=self.num_coords, h_dim=self.cond_h_dim, 
                                           latent_dim=self.cond_latent_dim, n_frames=self.n_frames_condition, 
                                           dropout=self.cond_dropout, n_joints=self.n_joints, 
-                                          layer_channels=self.cond_channels, device=self.device_)
+                                          layer_channels=self.cond_channels, device=self.device)
             elif self.conditioning_architecture == 'E':
                 condition_encoder = STSE(c_in=self.num_coords, h_dim=self.cond_h_dim, 
                                          latent_dim=self.cond_latent_dim, n_frames=self.n_frames_condition, 
                                          dropout=self.cond_dropout, n_joints=self.n_joints, 
-                                         layer_channels=self.cond_channels, device=self.device_)
+                                         layer_channels=self.cond_channels, device=self.device)
             elif self.conditioning_architecture == 'E_unet':
                 condition_encoder = STSE_Unet(c_in=self.num_coords, embedding_dim=self.embedding_dim,
                                               latent_dim=self.cond_latent_dim, n_frames=self.n_frames_condition,
                                               n_joints=self.n_joints, dropout=self.cond_dropout,
-                                              unet_down_channels=self.cond_channels, device=self.device_, set_out_layer=True)
+                                              unet_down_channels=self.cond_channels, device=self.device, set_out_layer=True)
             else:
                 raise NotImplementedError(f'Conditioning architecture {self.conditioning_architecture} not implemented.')
         else:
@@ -119,7 +118,7 @@ class MoCoDAD(pl.LightningModule):
             
         model = STSAE_Unet(c_in=self.num_coords, embedding_dim=self.embedding_dim, 
                            n_frames=self.n_frames_corrupt, dropout=self.dropout, 
-                           n_joints=self.n_joints, device=self.device_,
+                           n_joints=self.n_joints, device=self.device,
                            concat_condition=(self.conditioning_strategy == 'concat'), 
                            inject_condition=(self.conditioning_strategy == 'inject'))
         
@@ -159,19 +158,19 @@ class MoCoDAD(pl.LightningModule):
         generated_xs = []
         for _ in range(self.n_generated_samples):
             # Generate gaussian noise of the same shape as the corrupt_data
-            x = torch.randn_like(corrupt_data, device=self.device_)
+            x = torch.randn_like(corrupt_data, device=self.device)
             for i in reversed(range(1, self.noise_steps)):
                 
                 # Set the time step
-                t = torch.full(size=(B,), fill_value=i, dtype=torch.long, device=self.device_)
+                t = torch.full(size=(B,), fill_value=i, dtype=torch.long, device=self.device)
                 # Predict the noise
                 predicted_noise = self._unet_forward(x, t=t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
                 # Get the alpha and beta values and expand them to the shape of the predicted noise
-                alpha = self.alpha[t][:, None, None, None]
-                alpha_hat = self.alpha_hat[t][:, None, None, None]
-                beta = self.beta[t][:, None, None, None]
+                alpha = self._alpha[t][:, None, None, None]
+                alpha_hat = self._alpha_hat[t][:, None, None, None]
+                beta = self._beta[t][:, None, None, None]
                 # Generate gaussian noise of the same shape as the predicted noise
-                noise = torch.randn_like(x, device=self.device_) if i > 1 else torch.zeros_like(x, device=self.device_)
+                noise = torch.randn_like(x, device=self.device) if i > 1 else torch.zeros_like(x, device=self.device)
                 # Recover the predicted sequence
                 x = (1 / torch.sqrt(alpha) ) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
             # Append the generated sequence to the list of generated sequences
@@ -205,7 +204,7 @@ class MoCoDAD(pl.LightningModule):
         # Encode the condition data
         condition_embedding, rec_cond_data = self._encode_condition(condition_data)
         # Sample the time steps and currupt the data
-        t = self.noise_scheduler.sample_timesteps(corrupt_data.shape[0]).to(self.device_)
+        t = self.noise_scheduler.sample_timesteps(corrupt_data.shape[0]).to(self.device)
         x_t, noise = self.noise_scheduler.noise_graph(corrupt_data, t) 
         # Predict the noise
         predicted_noise = self._unet_forward(x_t, t=t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
@@ -493,7 +492,7 @@ class MoCoDAD(pl.LightningModule):
             loss_of_selected_x = compute_loss(selected_x)
         elif aggr_strategy == 'best' or aggr_strategy == 'worst':
             strategy = (lambda x,y: x < y) if aggr_strategy == 'best' else (lambda x,y: x > y)
-            loss_of_selected_x = torch.full((B,), fill_value=(1e10 if aggr_strategy == 'best' else -1.), device=self.device_)
+            loss_of_selected_x = torch.full((B,), fill_value=(1e10 if aggr_strategy == 'best' else -1.), device=self.device)
             selected_x = torch.zeros((B, *repr_shape)).to(self.device)
 
             for i in range(len(generated_xs)):
@@ -656,7 +655,7 @@ class MoCoDAD(pl.LightningModule):
         
         if self.conditioning_strategy == 'random_imp':
             # Randomly select the indices of the conditioning frames and cut the input sequence accordingly
-            indices = torch.tensor([torch.randperm(self.n_frames).tolist() for _ in range(data.shape[0])], device=self.device_)
+            indices = torch.tensor([torch.randperm(self.n_frames).tolist() for _ in range(data.shape[0])], device=self.device)
             cond_data, corrupt_data, cond_idxs, corrupt_idxs = self._cut_array_from_indices(data.permute((0,1,3,2)), indices)
             cond_data = cond_data.permute((0,1,3,2))
             corrupt_data = corrupt_data.permute((0,1,3,2))
@@ -664,24 +663,24 @@ class MoCoDAD(pl.LightningModule):
         elif self.conditioning_strategy == 'no_condition':
             # The input to the model is the whole sequence
             cond_data, cond_idxs = None, None
-            corrupt_data, corrupt_idxs = data, torch.arange(self.n_frames, device=self.device_)
+            corrupt_data, corrupt_idxs = data, torch.arange(self.n_frames, device=self.device)
             
         elif len(self.conditioning_indices) == 0:
             if self.conditioning_strategy == 'interleave': 
                 # Take conditioning frames with step equal to `conditioning indices` starting from the first frame
-                cond_idxs = torch.arange(start=0, end=self.n_frames, step=self.conditioning_indices, device=self.device_)
-                corrupt_idxs = torch.arange(start=1, end=self.n_frames, step=self.conditioning_indices, device=self.device_)
+                cond_idxs = torch.arange(start=0, end=self.n_frames, step=self.conditioning_indices, device=self.device)
+                corrupt_idxs = torch.arange(start=1, end=self.n_frames, step=self.conditioning_indices, device=self.device)
             else:
                 # Use the integer in `conditioning indices` to split the input sequence in two parts
-                cond_idxs = torch.arange(start=0, end=self.n_frames//self.conditioning_indices, device=self.device_)
-                corrupt_idxs = torch.arange(start=self.n_frames//self.conditioning_indices, end=self.n_frames, device=self.device_)
+                cond_idxs = torch.arange(start=0, end=self.n_frames//self.conditioning_indices, device=self.device)
+                corrupt_idxs = torch.arange(start=self.n_frames//self.conditioning_indices, end=self.n_frames, device=self.device)
             cond_data = torch.index_select(data, 2, cond_idxs)
             corrupt_data = torch.index_select(data, 2, corrupt_idxs)
             
         else:
             # Take the indices explicitly specified in `conditioning indices`
-            cond_idxs = torch.tensor(self.conditioning_indices, device=self.device_)
-            corrupt_idxs = torch.tensor([i for i in range(self.n_frames) if i not in self.conditioning_indices], device=self.device_)
+            cond_idxs = torch.tensor(self.conditioning_indices, device=self.device)
+            corrupt_idxs = torch.tensor([i for i in range(self.n_frames) if i not in self.conditioning_indices], device=self.device)
             cond_data = torch.index_select(data, 2, cond_idxs)
             corrupt_data = torch.index_select(data, 2, corrupt_idxs) 
 
@@ -733,10 +732,10 @@ class MoCoDAD(pl.LightningModule):
         """
         
         self.noise_scheduler = Diffusion(noise_steps=self.noise_steps, n_joints=self.n_joints,
-                                         device=self.device_, time=self.n_frames)
-        self.beta = self.noise_scheduler.schedule_noise().to(self.device_)
-        self.alpha = (1. - self.beta).to(self.device_)
-        self.alpha_hat = torch.cumprod(self.alpha, dim=0).to(self.device_)
+                                         device=self.device, time=self.n_frames)
+        self._beta_ = self.noise_scheduler.schedule_noise()
+        self._alpha_ = (1. - self._beta_)
+        self._alpha_hat_ = torch.cumprod(self._alpha_, dim=0)
         
         
     def _unet_forward(self, corrupt_data:torch.Tensor, t:torch.Tensor=None, condition_data:torch.Tensor=None, 
@@ -772,10 +771,24 @@ class MoCoDAD(pl.LightningModule):
         Returns:
             Tuple[torch.Tensor, List[torch.Tensor]]: input data, list containing the transformation index, the metadata and the actual frames.
         """
-        tensor_data = x[0].to(self.device_)
+        tensor_data = x[0].to(self.device)
         transformation_idx = x[1]
         metadata = x[2]
         actual_frames = x[3]
         meta_out = [transformation_idx, metadata, actual_frames]
         return tensor_data, meta_out
 
+
+    @property
+    def _beta(self) -> torch.Tensor:
+        return self._beta_.to(self.device)
+    
+    
+    @property
+    def _alpha(self) -> torch.Tensor:
+        return self._alpha_.to(self.device)
+    
+    
+    @property
+    def _alpha_hat(self) -> torch.Tensor:
+        return self._alpha_hat_.to(self.device)

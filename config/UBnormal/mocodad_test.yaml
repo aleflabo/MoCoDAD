@@ -2,7 +2,7 @@
 
 ## General settings
 split: 'test' # data split; choices ['train', 'test']
-debug: false # if true, load only a few data samples
+debug: true # if true, load only a few data samples
 seed: 999
 validation: false # use validation; only for UBnormal
 use_hr: true # for validation and test on UBnormal
@@ -32,7 +32,6 @@ use_ema: false
 ### Model's configuration
 
 ## U-Net's configuration
-device: 'cuda' # device to use; choices ['cuda', 'cpu']
 embedding_dim: 16 # dimension of the embedding of the UNet
 dropout: 0. # probability of dropout
 conditioning_strategy: 'inject' # choices ['inject' (add2layers), 'concat' (cat), 'inbetween_imp' (interleave), 'random_imp' (random_indices), 'no_condition' (none)]
