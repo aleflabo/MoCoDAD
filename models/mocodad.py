@@ -344,6 +344,8 @@ class MoCoDAD(pl.LightningModule):
         all_gts = [file_name for file_name in os.listdir(self.gt_path) if file_name.endswith('.npy')]
         all_gts = sorted(all_gts)
         scene_clips = [(int(fn.split('_')[0]), int(fn.split('_')[1].split('.')[0])) for fn in all_gts]
+        hr_ubnormal_masked_clips = get_hr_ubnormal_mask(self.split) if self.use_hr else {}
+        hr_avenue_masked_clips = get_avenue_mask()
 
         num_transform = self.num_transforms
         model_scores_transf = {}
@@ -390,17 +392,14 @@ class MoCoDAD(pl.LightningModule):
 
                 clip_score = np.mean(np.stack(error_per_person, axis=0), axis=0)
                 
-                if self.use_hr:
-                    hr_ubnormal_masked_clips = get_hr_ubnormal_mask(self.split)
-                    if (scene_idx, clip_idx) in hr_ubnormal_masked_clips:
-                        clip_score = clip_score[hr_ubnormal_masked_clips[(scene_idx, clip_idx)]]
-                        gt = gt[hr_ubnormal_masked_clips[(scene_idx, clip_idx)]]
+                if (scene_idx, clip_idx) in hr_ubnormal_masked_clips:
+                    clip_score = clip_score[hr_ubnormal_masked_clips[(scene_idx, clip_idx)]]
+                    gt = gt[hr_ubnormal_masked_clips[(scene_idx, clip_idx)]]
                 
                 # removing the non-HR frames for Avenue dataset
-                masked_clips = get_avenue_mask()
-                if clip_idx in masked_clips:
-                    clip_score = clip_score[np.array(masked_clips[clip_idx])==1]
-                    gt = gt[np.array(masked_clips[clip_idx])==1]
+                if clip_idx in hr_avenue_masked_clips:
+                    clip_score = clip_score[np.array(hr_avenue_masked_clips[clip_idx])==1]
+                    gt = gt[np.array(hr_avenue_masked_clips[clip_idx])==1]
 
                 clip_score = score_process(clip_score)
                 model_scores.append(clip_score)

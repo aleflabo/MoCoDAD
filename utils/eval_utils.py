@@ -169,6 +169,11 @@ def get_avenue_mask() -> Dict[int, List[int]]:
 
 def get_hr_ubnormal_mask(split:str):
     
+    if 'test' in split:
+        split = 'testing'
+    else:
+        split = 'validating'
+    
     path_to_boolean_masks = f'./data/UBnormal/hr_bool_masks/{split}/test_frame_mask/*'
     hr_boolean_masks = glob(path_to_boolean_masks)
     hr_ubnormal_masked_clips = {}

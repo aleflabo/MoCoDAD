@@ -308,7 +308,7 @@ def get_dataset_and_loader(args, split='train', validation=False):
     dataset_args['seg_stride'] = args.seg_stride if split == 'train' else 1  # No strides for test set
     if args.normalization_strategy=='robust': 
         dataset = PoseDatasetRobust(path_to_data=args.data_dir, 
-                                    exp_dir=args.exp_dir,
+                                    exp_dir=args.ckpt_dir,
                                     include_global=(args.num_coords==6), split=split, **dataset_args)
     else:
         dataset = PoseDataset(args.pose_path[split], **dataset_args) 

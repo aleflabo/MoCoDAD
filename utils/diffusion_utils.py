@@ -50,11 +50,12 @@ class Diffusion:
         Ɛ = torch.randn_like(x)
         return sqrt_alpha_hat * x + sqrt_one_minus_alpha_hat * Ɛ, Ɛ
     
-    
+
     def noise_graph(self, x:torch.Tensor, t:torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        sqrt_alpha_hat = torch.sqrt(self.alpha_hat[t])[:, None, None, None].to(t.get_device())
-        sqrt_one_minus_alpha_hat = torch.sqrt(1 - self.alpha_hat[t])[:, None, None, None].to(t.get_device())
-        Ɛ = (torch.randn_like(x)).to(t.get_device())
+        alpha_hat = self.alpha_hat.to(t.get_device())
+        sqrt_alpha_hat = torch.sqrt(alpha_hat[t])[:, None, None, None]
+        sqrt_one_minus_alpha_hat = torch.sqrt(1 - alpha_hat[t])[:, None, None, None]
+        Ɛ = torch.randn_like(x, device=t.get_device())
         
         return sqrt_alpha_hat *x + sqrt_one_minus_alpha_hat * Ɛ, Ɛ
     

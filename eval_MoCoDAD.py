@@ -32,5 +32,6 @@ if __name__== '__main__':
         dataset, loader, _, _ = get_dataset_and_loader(args, split=args.split)
         
         # Initialize trainer and test
-        trainer = pl.Trainer(accelerator=args.accelerator, devices=args.devices[:1], max_epochs=1)
+        trainer = pl.Trainer(accelerator=args.accelerator, devices=args.devices[:1],
+                             default_root_dir=args.ckpt_dir, max_epochs=1, logger=False)
         out = trainer.test(model, dataloaders=loader, ckpt_path=ckpt_path)
