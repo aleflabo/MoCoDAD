@@ -39,7 +39,7 @@ if __name__== '__main__':
 
     # Set callbacks and logger
     callbacks = [ModelCheckpoint(dirpath=args.ckpt_dir, save_top_k=2,
-                                 monitor="validation_auc" if (args.dataset_choice == 'UBnormal' or args.validation) else 'loss',
+                                 monitor="AUC" if (args.dataset_choice == 'UBnormal' or args.validation) else 'loss',
                                  mode="max" if (args.dataset_choice == 'UBnormal' or args.validation) else 'min')]
     
     callbacks += [EMACallback()] if args.use_ema else []

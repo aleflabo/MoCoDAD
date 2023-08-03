@@ -2,7 +2,7 @@
 
 ## General settings
 split: 'train' # data split; choices ['train', 'test']
-debug: true # if true, load only a few data samples
+debug: false # if true, load only a few data samples
 seed: 999
 validation: true # use validation; only for UBnormal
 use_hr: false # for validation and test on UBnormal

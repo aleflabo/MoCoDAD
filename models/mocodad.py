@@ -322,7 +322,7 @@ class MoCoDAD(pl.LightningModule):
         
         optimizer = Adam(self.parameters(), lr=self.learning_rate)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99, last_epoch=-1, verbose=False)
-        return {'optimizer':optimizer,'lr_scheduler':scheduler,'monitor':'validation_auc'}
+        return {'optimizer':optimizer,'lr_scheduler':scheduler,'monitor':'AUC'}
             
 
     def post_processing(self, out:np.ndarray, gt_data:np.ndarray, trans:np.ndarray, meta:np.ndarray, frames:np.ndarray) -> float:
