@@ -23,8 +23,6 @@ class MoCoDADlatent(MoCoDAD):
         
         # MoCoDAD parameters for the latent space
         self.stage = args.stage
-        self.time_cond_strategy = args.time_cond_strategy
-        self.latent_cond_strategy = args.latent_cond_strategy
         self.latent_embedding_dim = args.latent_embedding_dim
         self.hidden_sizes = args.hidden_sizes
         self.pretrained_model_ckpt_path = args.pretrained_model_ckpt_path
@@ -34,6 +32,7 @@ class MoCoDADlatent(MoCoDAD):
         
         # Load the pretrained model
         if self.stage == 'diffusion':
+            assert self.pretrained_model_ckpt_path is not None or self.pretrained_model_ckpt_path != '', 'Pretrained model checkpoint path not specified'
             self._freeze_main_net_and_load_ckpt()
         
         
@@ -187,4 +186,3 @@ class MoCoDADlatent(MoCoDAD):
         self.load_state_dict(torch.load(self.pretrained_model_ckpt_path)['state_dict'], strict=False)
         for param in self.model.parameters():
             param.requires_grad = False
-        print('loaded ckpt')
