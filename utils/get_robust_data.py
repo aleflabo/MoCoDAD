@@ -23,10 +23,10 @@ def load_scaler(path):
 
 def data_of_combined_model(**args):
     # General
-    exp_dir = args.get('exp_dir', '/media/zeus/giant-hdd/stdrr/models/ours/UBnormal')
+    exp_dir = args.get('exp_dir', '')
     split = args.get('split', 'train')
     normalize_pose = args.get('normalize_pose', True)
-    trajectories_path = args.get('trajectories_path', '/media/zeus/giant-hdd/stdrr/code/skeleton_based_anomaly_detection/data/UBnormal')
+    trajectories_path = args.get('trajectories_path', '')
     include_global = args.get('include_global', True)
     debug = args.get('debug', False)
     if 'train' in split:

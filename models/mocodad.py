@@ -264,7 +264,9 @@ class MoCoDAD(pl.LightningModule):
             tensors = {'prediction':out, 'gt_data':gt_data, 
                        'trans':trans, 'metadata':meta, 'frames':frames}
             self._save_tensors(tensors, split_name=self.split, aggr_strategy=self.aggregation_strategy, n_gen=self.n_generated_samples)
-        return self.post_processing(out, gt_data, trans, meta, frames)
+        auc_score = self.post_processing(out, gt_data, trans, meta, frames)
+        self.log('AUC', auc_score)
+        return auc_score
     
     
     def validation_step(self, batch:List[torch.Tensor], batch_idx:int) -> None:
@@ -309,7 +311,9 @@ class MoCoDAD(pl.LightningModule):
             tensors = {'prediction':out, 'gt_data':gt_data, 
                        'trans':trans, 'metadata':meta, 'frames':frames}
             self._save_tensors(tensors, split_name=self.split, aggr_strategy=self.aggregation_strategy, n_gen=self.n_generated_samples)
-        return self.post_processing(out, gt_data, trans, meta, frames)
+        auc_score =  self.post_processing(out, gt_data, trans, meta, frames)
+        self.log('AUC', auc_score, sync_dist=True)
+        return auc_score
 
     
     def configure_optimizers(self) -> Dict:
@@ -343,8 +347,8 @@ class MoCoDAD(pl.LightningModule):
         all_gts = [file_name for file_name in os.listdir(self.gt_path) if file_name.endswith('.npy')]
         all_gts = sorted(all_gts)
         scene_clips = [(int(fn.split('_')[0]), int(fn.split('_')[1].split('.')[0])) for fn in all_gts]
-        hr_ubnormal_masked_clips = get_hr_ubnormal_mask(self.split) if self.use_hr else {}
-        hr_avenue_masked_clips = get_avenue_mask()
+        hr_ubnormal_masked_clips = get_hr_ubnormal_mask(self.split) if (self.use_hr and (self.dataset_name == 'UBnormal')) else {}
+        hr_avenue_masked_clips = get_avenue_mask() if self.dataset_name == 'HR-Avenue' else {}
 
         num_transform = self.num_transforms
         model_scores_transf = {}
@@ -416,7 +420,6 @@ class MoCoDAD(pl.LightningModule):
         
         # computing the AUC
         auc = roc_auc_score(gt,pds)
-        self.log('AUC', auc)
         
         return auc
     
@@ -433,8 +436,10 @@ class MoCoDAD(pl.LightningModule):
         """
         
         tensors = self._load_tensors(split_name, self.aggregation_strategy, self.n_generated_samples)
-        return self.post_processing(tensors['prediction'], tensors['gt_data'], tensors['trans'],
-                                    tensors['metadata'], tensors['frames'])
+        auc_score = self.post_processing(tensors['prediction'], tensors['gt_data'], tensors['trans'],
+                                         tensors['metadata'], tensors['frames'])
+        print(f'AUC score: {auc_score}')
+        return auc_score
         
     
     
