@@ -4,7 +4,7 @@
 split: 'train' # data split; choices ['train', 'test']
 debug: false # if true, load only a few data samples
 seed: 999
-validation: true # use validation; only for UBnormal
+validation: false # use validation; only for UBnormal
 use_hr: false # for validation and test on UBnormal
 
 ## Computational resources
@@ -13,9 +13,9 @@ devices: [0,1] # indices of cuda devices to use
 
 ## Paths
 dir_name: 'train_experiment' # name of the directory of the current experiment
-data_dir: './data/UBnormal/' # path to the data
+data_dir: './data/HR-ShanghaiTech/' # path to the data
 exp_dir: './checkpoints' # path to the directory that will contain the current experiment directory
-test_path: './data/UBnormal/validating/test_frame_mask' # path to the test data
+test_path: './data/HR-ShanghaiTech/testing/test_frame_mask' # path to the test data
 load_ckpt: '' # name of the checkpoint to load at inference time
 create_experiment_dir: true
 
@@ -85,11 +85,11 @@ load_tensors: false # if true, load the generated tensors for faster inference
 ### Dataset's configuration
 
 ## Important parameters
-dataset_choice: 'UBnormal'
+dataset_choice: 'HR-STC'
 seg_len: 6 # length of the window (cond+noised) 
-vid_res: [1080,720]
-batch_size: 1024
-pad_size: -1 # size of the padding 
+vid_res: [856,480]
+batch_size: 2048
+pad_size: 3 # size of the padding 
 
 ## Other parameters
 headless: false # remove the keypoints of the head

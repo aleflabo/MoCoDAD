@@ -99,9 +99,8 @@ normalization_strategy: 'robust' # use 'none' to avoid normalization, 'robust' o
 num_coords: 2 # number of coordinates to use
 num_transform: 5 # number of transformations to apply
 num_workers: 8
-path_to_robust: './data/UBnormal/'
 seg_stride: 1
 seg_th: 0
 start_offset: 0
-symm_range: True
+symm_range: true
 use_fitted_scaler: false
