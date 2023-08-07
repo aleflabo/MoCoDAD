@@ -246,7 +246,7 @@ class STSAE_Unet(STSE_Unet):
                  unet_down_channels:List[int]=[16, 32, 32, 64, 64, 128, 64], 
                  unet_up_channels:List[int]=[64, 32, 32, 2], 
                  dropout:float=0.3, device:Union[str, torch.DeviceObjType]='cpu',
-                 concat_condition:bool=True, inject_condition:bool=False) -> None:
+                 concat_condition:bool=True, inject_condition:bool=False, use_bottleneck:bool=False) -> None:
         """
         Class that downscales the input pose sequence along the joints dimension, expands the channels and upscales it back.
         This class inherits from the STSE_Unet class, adding the upscaling logic to the parent class.
@@ -262,23 +262,28 @@ class STSAE_Unet(STSE_Unet):
             device (Union[str, torch.DeviceObjType], optional): model device. Defaults to 'cpu'.
             concat_condition (bool, optional): concatenate the conditioning data to the input sequence. Defaults to True.
             inject_condition (bool, optional): provide the embedding of the conditioning data to the latent layers of the model. Defaults to False.
+            use_bottleneck (bool, optional): use a bottleneck layer in the latent space. Defaults to False.
         """
         
         super(STSAE_Unet, self).__init__(c_in, embedding_dim, None, n_frames, n_joints, unet_down_channels,
-                                         dropout, device, set_out_layer=False)
+                                         dropout, device, set_out_layer=use_bottleneck)
         
         # Set the model's main parameters (the other parameters are inherited from the parent class)
         self.unet_up_channels = unet_up_channels
         self.concat_condition = concat_condition
         self.inject_condition = inject_condition
+        self.use_bottleneck = use_bottleneck
         
         # Build the model
-        self.build_model()
+        self.build_model(use_bottleneck)
         
         
-    def build_model(self, set_out_layer:bool=False) -> None:
+    def build_model(self, use_bottleneck:bool=False) -> None:
         """
         Build the upscaling part of the model. The downscaling part is built by the parent class.
+        
+        Args:
+            use_bottleneck (bool, optional): use a bottleneck layer in the latent space. Defaults to False.
         """
         
         kernel_size = [1,1]
@@ -339,6 +344,11 @@ class STSAE_Unet(STSE_Unet):
 
         self.up2 = CNN_layer(self.joints_to_consider['b'], self.joints_to_consider['a'], kernel_size, self.dropout)
         self.up3 = CNN_layer(self.joints_to_consider['c'], self.joints_to_consider['b'], kernel_size, self.dropout)
+        
+        if use_bottleneck:
+            self.rev_to_time_dim = torch.nn.Linear(in_features=self.__latent_dim, 
+                                                   out_features=self.unet_down_channels[6]*self.n_frames*self.joints_to_consider['c'])
+            
     
     
     def _upscale(self, X:torch.Tensor, fd1:torch.Tensor, d1:torch.Tensor, d2:torch.Tensor, t:torch.Tensor=None) -> torch.Tensor:

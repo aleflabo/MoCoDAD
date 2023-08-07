@@ -197,3 +197,92 @@ class DecoderResiduals(Decoder):
         X = self.out(X.permute(0, 1, 3, 2).contiguous()).permute(0, 1, 3, 2).contiguous()
 
         return X
+    
+
+
+class Denoiser(nn.Module):
+    def __init__(self, input_size:int, hidden_sizes:List[int], cond_size:int=None, bias:bool=True) -> None:
+        """
+        Class that implements a denoiser network for diffusion in the latent space.
+
+        Args:
+            input_size (int): size of the input
+            hidden_sizes (List[int]): list of hidden sizes
+            cond_size (int, optional): size of the conditioning embedding. Defaults to None.
+            bias (bool, optional): add bias. Defaults to True.
+        """
+        
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_sizes = hidden_sizes
+        self.cond_size = cond_size
+        self.embedding_dim = self.cond_size
+        self.bias = bias
+        
+        # Build the model
+        self.build_model()
+        
+        
+    def build_model(self) -> None:
+        self.net = nn.ModuleList()
+        self.cond_layers = nn.ModuleList() if self.cond_size is not None else None
+        n_layers = len(self.hidden_sizes)
+        for idx, next_dim in enumerate(self.hidden_sizes):
+            if self.cond_size is not None:
+                self.cond_layers.append(nn.Linear(self.cond_size, next_dim, bias=self.bias))
+            if idx == n_layers-1:
+                self.net.append(nn.Linear(input_size, next_dim, bias=self.bias))
+            else:
+                self.net.append(nn.Sequential(nn.Linear(input_size, next_dim, bias=self.bias),
+                                              nn.BatchNorm1d(next_dim), nn.ReLU(inplace=True)))
+                input_size = next_dim
+                
+                
+    def pos_encoding(self, t:torch.Tensor, channels:int) -> torch.Tensor:
+        """
+        Positional encoding for embedding the time step.
+
+        Args:
+            t (torch.Tensor): time step
+            channels (int): embedding dimension
+
+        Returns:
+            torch.Tensor: positional encoding
+        """
+        
+        inv_freq = 1.0 / (
+            10000 ** (torch.arange(0, channels, 2, device=self.device).float() / channels)
+        ).to(t.device)
+        pos_enc_a = torch.sin(t.repeat(1, channels // 2) * inv_freq)
+        pos_enc_b = torch.cos(t.repeat(1, channels // 2) * inv_freq)
+        pos_enc = torch.cat([pos_enc_a, pos_enc_b], dim=-1)
+        return pos_enc
+                
+
+    def forward(self, X:torch.Tensor, t:torch.Tensor, cond:torch.Tensor=None) -> torch.Tensor:
+        """
+        Forward pass of the model.
+
+        Args:
+            X (torch.Tensor): input tensor of shape [batch_size, input_size]
+            t (torch.Tensor): time tensor of shape [batch_size]
+            cond (torch.Tensor, optional): input tensor of shape [batch_size, cond_size]. Defaults to None.
+
+        Returns:
+            torch.Tensor: output tensor of shape [batch_size, hidden_sizes[-1]]
+        """
+        # Encode the time step
+        t = t.unsqueeze(-1).type(torch.float)
+        t = self.pos_encoding(t, self.embedding_dim)
+        
+        # Add conditioning signal
+        if cond is not None:
+            cond = t + cond
+        else:
+            cond = t
+        
+        for i in range(len(self.net)):
+            X = self.net[i](X)
+            if cond is not None:
+                X += self.cond_layers[i](cond)
+        return X
