@@ -12,13 +12,13 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 
 <!-- Visit our [**webpage**](https://www.pinlab.org/coskad) for more details. -->
 
-![teaser](assets/mocodad.svg) 
+![teaser](assets/mocodad.jpg) 
 
 ## Content
 ```
 .
 ├── assets
-│   ├── mocodad.png
+│   ├── mocodad.jpg
 ├── config
 │   ├── Avenue
 │   │   ├── mocodad_test.yaml
