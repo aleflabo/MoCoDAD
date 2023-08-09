@@ -72,8 +72,9 @@ conda activate mocodad
 ```
 
 ### Datasets
-Send a mail to flaborea@di.uniroma1.it to have the datasets. (We're planning to uploading them to a publicly available repository)
+You can download the extracted poses from the [GDRive](https://drive.google.com/drive/folders/1fWT1rJ0rEJJQd4NJQ5v6mGm89kcPP_WQ?usp=sharing).
 
+Place the extracted folder in a "./data" folder and change the configs accordingly.
 
 ### **Training** 
 
