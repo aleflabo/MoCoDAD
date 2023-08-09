@@ -12,7 +12,7 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 
 <!-- Visit our [**webpage**](https://www.pinlab.org/coskad) for more details. -->
 
-![teaser](assets/mocodad.png) 
+![teaser](assets/mocodad.svg) 
 
 ## Content
 ```
