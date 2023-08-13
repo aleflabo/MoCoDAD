@@ -5,19 +5,19 @@ split: 'test' # data split; choices ['train', 'test']
 debug: true # if true, load only a few data samples
 seed: 999
 validation: false # use validation; only for UBnormal
-use_hr: true # for validation and test on UBnormal
+use_hr: false # for validation and test on UBnormal
 
 ## Computational resources
 accelerator: 'gpu'
 devices: [0,] # indices of cuda devices to use
 
 ## Paths
-dir_name: 'test_experiment' # name of the directory of the current experiment
+dir_name: 'best_experiment' # name of the directory of the current experiment
 data_dir: './data/UBnormal/' # path to the data
 exp_dir: './checkpoints' # path to the directory that will contain the current experiment directory
 test_path: './data/UBnormal/testing/test_frame_mask' # path to the test data
 load_ckpt: 'best_weights.ckpt' # name of the checkpoint to load at inference time
-create_experiment_dir: false
+create_experiment_dir: false # if true, create a new directory for the current experiment
 
 ## WANDB configuration
 use_wandb: false
@@ -76,7 +76,10 @@ aggregation_strategy: 'best' # choices ['best', 'mean', 'median', 'random']; if 
                              # if 'mean_poses', the mean of the generated poses will be selected;
                              # if 'median_poses', the median of the generated poses will be selected;
                              # if 'all', all the generated poses will be selected
-save_tensors: false # if true, save the generated tensors for faster inference
+filter_kernel_size: 30 # size of the kernel to use for smoothing the anomaly score of each clip
+frames_shift: 18 # it compensates the shift of the anomaly score due to the sliding window; 
+                 # in conjuction with pad_size and filter_kernel_size, it strongly depends on the dataset
+save_tensors: true # if true, save the generated tensors for faster inference
 load_tensors: false # if true, load the generated tensors for faster inference
 
 ##############################

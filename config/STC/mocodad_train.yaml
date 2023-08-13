@@ -55,11 +55,11 @@ noise_steps: 10 # how many diffusion steps to perform
 
 ### Optimizer and scheduler's configuration
 n_epochs: 100
-opt_lr: 0.001
+opt_lr: 0.0001
 
 ## Losses' configuration
 loss_fn: 'smooth_l1' # loss function; choices ['mse', 'l1', 'smooth_l1']
-rec_weight: 0.01 # weight of the reconstruction loss
+rec_weight: 1. # weight of the reconstruction loss
 
 ##############################
 
@@ -76,6 +76,9 @@ aggregation_strategy: 'best' # choices ['best', 'mean', 'median', 'random']; if 
                              # if 'mean_poses', the mean of the generated poses will be selected;
                              # if 'median_poses', the median of the generated poses will be selected;
                              # if 'all', all the generated poses will be selected
+filter_kernel_size: 15 # size of the kernel to use for smoothing the anomaly score of each clip
+frames_shift: 9 # it compensates the shift of the anomaly score due to the sliding window; 
+                # in conjuction with pad_size and filter_kernel_size, it strongly depends on the dataset
 save_tensors: false # if true, save the generated tensors for faster inference
 load_tensors: false # if true, load the generated tensors for faster inference
 
@@ -88,8 +91,8 @@ load_tensors: false # if true, load the generated tensors for faster inference
 dataset_choice: 'HR-STC'
 seg_len: 6 # length of the window (cond+noised) 
 vid_res: [856,480]
-batch_size: 2048
-pad_size: 3 # size of the padding 
+batch_size: 4096
+pad_size: -1 # size of the padding 
 
 ## Other parameters
 headless: false # remove the keypoints of the head
@@ -99,7 +102,7 @@ normalization_strategy: 'robust' # use 'none' to avoid normalization, 'robust' o
 num_coords: 2 # number of coordinates to use
 num_transform: 5 # number of transformations to apply
 num_workers: 8
-seg_stride: 1
+seg_stride: 6 # stride of the sliding window
 seg_th: 0
 start_offset: 0
 symm_range: true

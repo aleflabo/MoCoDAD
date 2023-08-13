@@ -76,6 +76,9 @@ aggregation_strategy: 'best' # choices ['best', 'mean', 'median', 'random']; if 
                              # if 'mean_poses', the mean of the generated poses will be selected;
                              # if 'median_poses', the median of the generated poses will be selected;
                              # if 'all', all the generated poses will be selected
+filter_kernel_size: 30 # size of the kernel to use for smoothing the anomaly score of each clip
+frames_shift: 6 # it compensates the shift of the anomaly score due to the sliding window; 
+                # in conjuction with pad_size and filter_kernel_size, it strongly depends on the dataset
 save_tensors: false # if true, save the generated tensors for faster inference
 load_tensors: false # if true, load the generated tensors for faster inference
 
@@ -89,7 +92,7 @@ dataset_choice: 'HR-Avenue'
 seg_len: 6 # length of the window (cond+noised) 
 vid_res: [640,360]
 batch_size: 1024
-pad_size: 10 # size of the padding 
+pad_size: 12 # size of the padding 
 
 ## Other parameters
 headless: false # remove the keypoints of the head

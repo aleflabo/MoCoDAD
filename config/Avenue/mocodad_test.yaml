@@ -9,7 +9,7 @@ use_hr: false # for validation and test on UBnormal
 
 ## Computational resources
 accelerator: 'gpu'
-devices: [1,] # indices of cuda devices to use
+devices: [0,] # indices of cuda devices to use
 
 ## Paths
 dir_name: 'test_experiment' # name of the directory of the current experiment
@@ -17,7 +17,7 @@ data_dir: './data/HR-Avenue/' # path to the data
 exp_dir: './checkpoints' # path to the directory that will contain the current experiment directory
 test_path: './data/HR-Avenue/testing/test_frame_mask' # path to the test data
 load_ckpt: 'best_weights.ckpt' # name of the checkpoint to load at inference time
-create_experiment_dir: true
+create_experiment_dir: false # if true, create a new directory for the current experiment
 
 ## WANDB configuration
 use_wandb: false
@@ -76,6 +76,9 @@ aggregation_strategy: 'best' # choices ['best', 'mean', 'median', 'random']; if 
                              # if 'mean_poses', the mean of the generated poses will be selected;
                              # if 'median_poses', the median of the generated poses will be selected;
                              # if 'all', all the generated poses will be selected
+filter_kernel_size: 30 # size of the kernel to use for smoothing the anomaly score of each clip
+frames_shift: 6 # it compensates the shift of the anomaly score due to the sliding window; 
+                # in conjuction with pad_size and filter_kernel_size, it strongly depends on the dataset
 save_tensors: true # if true, save the generated tensors for faster inference
 load_tensors: false # if true, load the generated tensors for faster inference
 
@@ -88,8 +91,8 @@ load_tensors: false # if true, load the generated tensors for faster inference
 dataset_choice: 'HR-Avenue'
 seg_len: 6 # length of the window (cond+noised) 
 vid_res: [640,360]
-batch_size: 2048
-pad_size: 10 # size of the padding 
+batch_size: 1024
+pad_size: 12 # size of the padding
 
 ## Other parameters
 headless: false # remove the keypoints of the head
