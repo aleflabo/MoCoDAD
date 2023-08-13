@@ -21,7 +21,7 @@ from utils.model_utils import processing_data
 
 class MoCoDAD(pl.LightningModule):
     
-    losses = {'l1':nn.L1Loss, 'smooth_l1':nn.SmoothL1Loss, 'l2':nn.MSELoss}
+    losses = {'l1':nn.L1Loss, 'smooth_l1':nn.SmoothL1Loss, 'mse':nn.MSELoss}
     conditioning_strategies = {'cat':'concat', 'concat':'concat', 
                                'add2layers':'inject', 'inject':'inject', 
                                'inbetween_imp':'interleave', 'interleave':'interleave',  
@@ -75,7 +75,9 @@ class MoCoDAD(pl.LightningModule):
         self.ckpt_dir = args.ckpt_dir
         self.save_tensors = args.save_tensors
         self.num_transforms = args.num_transform
-        self.pad_size = args.pad_size
+        self.anomaly_score_pad_size = args.pad_size
+        self.anomaly_score_filter_kernel_size = args.filter_kernel_size
+        self.anomaly_score_frames_shift = args.frames_shift
         self.dataset_name = args.dataset_choice
         
         # Set the noise scheduler for the diffusion process
@@ -385,16 +387,17 @@ class MoCoDAD(pl.LightningModule):
                     out_fig, _, frames_fig = filter_vectors_by_cond([out_scene_clip, gt_scene_clip, frames_scene_clip], cond_fig) 
 
                     loss_matrix = compute_var_matrix(out_fig, frames_fig, n_frames)
-                    loss_matrix = np.where(loss_matrix == 0.0, np.nan, loss_matrix)
-                    fig_reconstruction_loss = np.nanmedian(loss_matrix, 0)
-                    fig_reconstruction_loss = np.where(np.isnan(fig_reconstruction_loss), 0, fig_reconstruction_loss) 
-                    if self.pad_size != -1:
-                        fig_reconstruction_loss = pad_scores(fig_reconstruction_loss, gt, self.pad_size)                    
+                    fig_reconstruction_loss = np.nanmax(loss_matrix, axis=0)
+                    if self.anomaly_score_pad_size != -1:
+                        fig_reconstruction_loss = pad_scores(fig_reconstruction_loss, gt, self.anomaly_score_pad_size)                 
                     
                     error_per_person.append(fig_reconstruction_loss)
-
-                clip_score = np.mean(np.stack(error_per_person, axis=0), axis=0)
+            
+                clip_score = np.stack(error_per_person, axis=0)
+                clip_score_log = np.log1p(clip_score)
+                clip_score = np.mean(clip_score, axis=0) + (np.amax(clip_score_log, axis=0)-np.amin(clip_score_log, axis=0))
                 
+                # removing the non-HR frames for UBnormal dataset
                 if (scene_idx, clip_idx) in hr_ubnormal_masked_clips:
                     clip_score = clip_score[hr_ubnormal_masked_clips[(scene_idx, clip_idx)]]
                     gt = gt[hr_ubnormal_masked_clips[(scene_idx, clip_idx)]]
@@ -404,7 +407,7 @@ class MoCoDAD(pl.LightningModule):
                     clip_score = clip_score[np.array(hr_avenue_masked_clips[clip_idx])==1]
                     gt = gt[np.array(hr_avenue_masked_clips[clip_idx])==1]
 
-                clip_score = score_process(clip_score)
+                clip_score = score_process(clip_score, self.anomaly_score_frames_shift, self.anomaly_score_filter_kernel_size)
                 model_scores.append(clip_score)
                 dataset_gt.append(gt)
                     
@@ -438,7 +441,7 @@ class MoCoDAD(pl.LightningModule):
         tensors = self._load_tensors(split_name, self.aggregation_strategy, self.n_generated_samples)
         auc_score = self.post_processing(tensors['prediction'], tensors['gt_data'], tensors['trans'],
                                          tensors['metadata'], tensors['frames'])
-        print(f'AUC score: {auc_score}')
+        print(f'AUC score: {auc_score:.6f}')
         return auc_score
         
     

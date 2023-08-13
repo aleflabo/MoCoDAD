@@ -1,5 +1,6 @@
 import os
 from glob import glob
+from typing import Dict, List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,8 +8,7 @@ import torch
 from scipy.ndimage import gaussian_filter1d
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.preprocessing import MinMaxScaler
-from typing import List, Dict
-    
+
 
 def compute_fig_matrix(pos, frames_pos, n_frames):
     assert len(pos.shape) == 4
@@ -97,12 +97,11 @@ def calculate_loss(loss_func, input, target, dataname, to_pow=False):
     return reco_loss.detach().cpu().numpy()
 
 
-def score_process(score):
+def score_process(score, shift, kernel_size):
     
     scores_shifted = np.zeros_like(score)
-    shift = 8 + (8 // 2) - 1
     scores_shifted[shift:] = score[:-shift]
-    score = gaussian_filter1d(scores_shifted, 30)
+    score = gaussian_filter1d(scores_shifted, kernel_size)
     
     return score
 
