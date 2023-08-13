@@ -12,40 +12,41 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 
 <!-- Visit our [**webpage**](https://www.pinlab.org/coskad) for more details. -->
 
-![teaser](assets/model.png) 
+![teaser](assets/mocodad.jpg) 
 
 ## Content
 ```
 .
 ├── assets
-│   └── model.png
+│   ├── mocodad.jpg
 ├── config
 │   ├── Avenue
-│   │   └── diffusion_ave.yaml
+│   │   ├── mocodad_test.yaml
+│   │   └── mocodad_train.yaml
 │   ├── STC
-│   │   └── diffusion_stc.yaml
+│   │   ├── mocodad_test.yaml
+│   │   └── mocodad_train.yaml
 │   └── UBnormal
-│       └── diffusion.yaml
+│       ├── mocodad-latent_train.yaml
+│       ├── mocodad_test.yaml
+│       └── mocodad_train.yaml
 ├── environment.yaml
 ├── eval_MoCoDAD.py
 ├── models
 │   ├── common
-│   │   ├── components.py
-│   │   └── diffusion_components.py
-│   ├── diffusion_STS.py
+│   │   └── components.py
 │   ├── gcae
-│   │   ├── stsgcn_diffusion.py
-│   │   ├── stsgcn_diffusion_unet.py
 │   │   └── stsgcn.py
-│   ├── stsae
-│   │   ├── stsae_diffusion.py
-│   │   ├── stsae_diffusion_unet.py
-│   │   └── stsae_hidden_hypersphere.py
-│   ├── stse
-│   │   └── stse_hidden_hypersphere.py
-│   └── stsve
-│       └── stsve_hidden_hypersphere.py
+│   ├── mocodad_latent.py
+│   ├── mocodad.py
+│   └── stsae
+│       ├── stsae.py
+│       └── stsae_unet.py
 ├── README.md
+├── scripts
+│   ├── count_anomalies.py
+│   ├── to_morais_format.py
+│   └── visualization.py
 ├── train_MoCoDAD.py
 └── utils
     ├── argparser.py
@@ -60,6 +61,7 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
     ├── model_utils.py
     ├── preprocessing.py
     └── tools.py
+    
 ```
 
 ## Setup
@@ -70,8 +72,9 @@ conda activate mocodad
 ```
 
 ### Datasets
-Send a mail to flaborea@di.uniroma1.it to have the datasets. (We're planning to uploading them to a publicly available repository)
+You can download the extracted poses from the [GDRive](https://drive.google.com/drive/folders/1fWT1rJ0rEJJQd4NJQ5v6mGm89kcPP_WQ?usp=sharing).
 
+Place the extracted folder in a "./data" folder and change the configs accordingly.
 
 ### **Training** 
 
@@ -79,11 +82,12 @@ To train MoCoDAD, you can select the different type of conditioning of the model
 
 In each config file you can choose the conditioning strategy and change the diffusion process parameters:
 
-1. Conditioning
-    -  inject_condition: best performing conditioning techniques. Inject condition information into the model. The indexes to be used as conditioning can be set using the 'indices' parameter. Enabled by default. 
-    - concat_condition: concat conditioning and noise data to be passed to the model
-    - no_condition: if enabled, no condition is passed to the model
-    - interleave: if 'num_random_indices'=0 the poses in 'indices' are used as conditioning. If 'num_random_indices'>0 the conditioning poses are chosen at random 
+1. conditioning_strategy
+    -  'inject': Inject condition information into the model. The indices to be used as conditioning can be set using the 'conditioning_indices' parameter. Enabled by default. 
+    - 'concat': concat conditioning and noised data to be passed to the model. The indices to be used as conditioning can be set using the 'conditioning_indices' parameter.
+    - 'inbetween_imp': Uses the list of indices of the 'conditioning_indices' parameter to select the indices to be used as conditioning.
+    - 'random_imp': 'conditioning_indices' must be int and it is used as the number of random indices that will be selected 
+    - 'no_condition': if enabled, no motion condition is passed to the model
 
 2. Diffusion Process
     -  noise_steps: how many diffusion steps have to be performed
