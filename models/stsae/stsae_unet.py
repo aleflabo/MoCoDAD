@@ -35,12 +35,13 @@ class STSE_Unet(nn.Module):
         # Set the model's main parameters
         self.input_dim = c_in
         self.embedding_dim = embedding_dim
-        self.__latent_dim = latent_dim # Private attribute
+        self._latent_dim = latent_dim # Private attribute
         self.n_frames = n_frames
         self.n_joints = n_joints
         self.unet_down_channels = unet_down_channels
         self.dropout = dropout
         self.device = device
+        self.set_out_layer = set_out_layer
         
         # Build the model
         self.__build_model(set_out_layer)
@@ -149,9 +150,9 @@ class STSE_Unet(nn.Module):
         self.down2 = CNN_layer(self.joints_to_consider['b'], self.joints_to_consider['c'], kernel_size, self.dropout)
         
         if set_out_layer:
-            self.to_time_dim = torch.nn.Linear(in_features=self.unet_down_channels[6]*self.n_frames*self.joints_to_consider['c'], 
-                                               out_features=self.__latent_dim)
-    
+            self.to_time_dim = nn.Linear(in_features=self.unet_down_channels[6]*self.n_frames*self.joints_to_consider['c'], 
+                                         out_features=self._latent_dim)
+            
     
     # Name mangling to save a private copy of the build_model method
     __build_model = build_model
@@ -218,22 +219,30 @@ class STSE_Unet(nn.Module):
         return fd1, d1, d2
     
         
-    def forward(self, X:torch.Tensor, t:torch.Tensor) -> Tuple[torch.Tensor, List]:
+    def forward(self, X:torch.Tensor, t:torch.Tensor, condition_data:torch.Tensor=None) -> Tuple[torch.Tensor, List]:
         """
         Forward pass of the model.
 
         Args:
             X (torch.Tensor): input tensor of shape [batch_size, input_channels, n_frames, n_joints]
             t (torch.Tensor): time step
+            condition_data (torch.Tensor, optional): condition data; for compatibility with the other models. Defaults to None.
 
         Returns:
             Tuple[torch.Tensor, List]: output encoded sequence, list of the model's outputs (only for compatibility with the other models)
         """
         
+        # Encode the time step
+        t = t.unsqueeze(-1).type(torch.float)
+        t = self.pos_encoding(t, self.embedding_dim)
+    
+        t = t + condition_data
+        
         fd1, _, _ = self._downscale(X, t)
         
-        fd1 = torch.flatten(fd1,1)
-        fd1 = self.to_time_dim(fd1)
+        if self.set_out_layer:
+            fd1 = torch.flatten(fd1,1)
+            fd1 = self.to_time_dim(fd1)
         
         return fd1, []
     
@@ -246,7 +255,7 @@ class STSAE_Unet(STSE_Unet):
                  unet_down_channels:List[int]=[16, 32, 32, 64, 64, 128, 64], 
                  unet_up_channels:List[int]=[64, 32, 32, 2], 
                  dropout:float=0.3, device:Union[str, torch.DeviceObjType]='cpu',
-                 concat_condition:bool=True, inject_condition:bool=False, use_bottleneck:bool=False) -> None:
+                 concat_condition:bool=True, inject_condition:bool=False, use_bottleneck:bool=False, *, latent_dim:int=None) -> None:
         """
         Class that downscales the input pose sequence along the joints dimension, expands the channels and upscales it back.
         This class inherits from the STSE_Unet class, adding the upscaling logic to the parent class.
@@ -263,9 +272,11 @@ class STSAE_Unet(STSE_Unet):
             concat_condition (bool, optional): concatenate the conditioning data to the input sequence. Defaults to True.
             inject_condition (bool, optional): provide the embedding of the conditioning data to the latent layers of the model. Defaults to False.
             use_bottleneck (bool, optional): use a bottleneck layer in the latent space. Defaults to False.
+            latent_dim (int, optional): dimension of the latent space. Defaults to 64.
         """
         
-        super(STSAE_Unet, self).__init__(c_in, embedding_dim, None, n_frames, n_joints, unet_down_channels,
+        # Call the parent class and build part of the model
+        super(STSAE_Unet, self).__init__(c_in, embedding_dim, latent_dim, n_frames, n_joints, unet_down_channels,
                                          dropout, device, set_out_layer=use_bottleneck)
         
         # Set the model's main parameters (the other parameters are inherited from the parent class)
@@ -274,7 +285,7 @@ class STSAE_Unet(STSE_Unet):
         self.inject_condition = inject_condition
         self.use_bottleneck = use_bottleneck
         
-        # Build the model
+        # Build the upscaling part of the model
         self.build_model(use_bottleneck)
         
         
@@ -346,7 +357,7 @@ class STSAE_Unet(STSE_Unet):
         self.up3 = CNN_layer(self.joints_to_consider['c'], self.joints_to_consider['b'], kernel_size, self.dropout)
         
         if use_bottleneck:
-            self.rev_to_time_dim = torch.nn.Linear(in_features=self.__latent_dim, 
+            self.rev_to_time_dim = torch.nn.Linear(in_features=self._latent_dim, 
                                                    out_features=self.unet_down_channels[6]*self.n_frames*self.joints_to_consider['c'])
             
     
@@ -419,7 +430,13 @@ class STSAE_Unet(STSE_Unet):
             X = torch.cat([condition_data, X], dim=2)
         
         fd1, d1, d2 = self._downscale(X, t)
-
+        
+        if self.use_bottleneck:
+            fd1 = torch.flatten(fd1,1)
+            fd1 = self.to_time_dim(fd1)
+            fd1 = self.rev_to_time_dim(fd1)
+            fd1 = fd1.view(-1, self.unet_down_channels[6], self.n_frames, self.joints_to_consider['c'])
+            
         fd1 = self._upscale(X, fd1, d1, d2, t)
 
         return fd1, []

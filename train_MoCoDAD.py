@@ -7,6 +7,7 @@ import pytorch_lightning as pl
 import torch
 import yaml
 from models.mocodad import MoCoDAD
+from models.mocodad_latent import MoCoDADlatent
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import DDPStrategy
@@ -38,9 +39,18 @@ if __name__== '__main__':
     pl.seed_everything(args.seed)
 
     # Set callbacks and logger
+    if (hasattr(args, 'diffusion_on_latent') and args.stage == 'pretrain'):
+        monitored_metric = 'pretrain_rec_loss'
+        metric_mode = 'min'
+    elif (args.dataset_choice == 'UBnormal' or args.validation):
+        monitored_metric = 'AUC'
+        metric_mode = 'max'
+    else:
+        monitored_metric = 'loss_noise'
+        metric_mode = 'min'
     callbacks = [ModelCheckpoint(dirpath=args.ckpt_dir, save_top_k=2,
-                                 monitor="AUC" if (args.dataset_choice == 'UBnormal' or args.validation) else 'loss_noise',
-                                 mode="max" if (args.dataset_choice == 'UBnormal' or args.validation) else 'min')]
+                                 monitor=monitored_metric,
+                                 mode=metric_mode)]
     
     callbacks += [EMACallback()] if args.use_ema else []
     
@@ -55,7 +65,7 @@ if __name__== '__main__':
     _, train_loader, _, val_loader = get_dataset_and_loader(args, split=args.split, validation=args.validation)
     
     # Initialize model and trainer
-    model = MoCoDAD(args)
+    model = MoCoDADlatent(args) if hasattr(args, 'diffusion_on_latent') else MoCoDAD(args)
     
     trainer = pl.Trainer(accelerator=args.accelerator, devices=args.devices, default_root_dir=args.ckpt_dir, max_epochs=args.n_epochs, 
                          logger=wandb_logger, callbacks=callbacks, strategy=DDPStrategy(find_unused_parameters=False), 

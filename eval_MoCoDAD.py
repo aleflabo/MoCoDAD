@@ -4,6 +4,7 @@ import os
 import pytorch_lightning as pl
 import yaml
 from models.mocodad import MoCoDAD
+from models.mocodad_latent import MoCoDADlatent
 from utils.argparser import init_args
 from utils.dataset import get_dataset_and_loader
 
@@ -20,7 +21,7 @@ if __name__== '__main__':
     args = init_args(args)
 
     # Initialize the model
-    model = MoCoDAD(args)
+    model = MoCoDADlatent(args) if hasattr(args, 'diffusion_on_latent') else MoCoDAD(args)
     
     if args.load_tensors:
         # Load tensors and test

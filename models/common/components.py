@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -201,7 +201,7 @@ class DecoderResiduals(Decoder):
 
 
 class Denoiser(nn.Module):
-    def __init__(self, input_size:int, hidden_sizes:List[int], cond_size:int=None, bias:bool=True) -> None:
+    def __init__(self, input_size:int, hidden_sizes:List[int], cond_size:int=None, bias:bool=True, device:Union[str, torch.DeviceObjType]='cpu') -> None:
         """
         Class that implements a denoiser network for diffusion in the latent space.
 
@@ -210,6 +210,7 @@ class Denoiser(nn.Module):
             hidden_sizes (List[int]): list of hidden sizes
             cond_size (int, optional): size of the conditioning embedding. Defaults to None.
             bias (bool, optional): add bias. Defaults to True.
+            device (Union[str, torch.DeviceObjType], optional): device to use. Defaults to 'cpu'.
         """
         
         super().__init__()
@@ -218,6 +219,7 @@ class Denoiser(nn.Module):
         self.cond_size = cond_size
         self.embedding_dim = self.cond_size
         self.bias = bias
+        self.device = device
         
         # Build the model
         self.build_model()
@@ -227,6 +229,7 @@ class Denoiser(nn.Module):
         self.net = nn.ModuleList()
         self.cond_layers = nn.ModuleList() if self.cond_size is not None else None
         n_layers = len(self.hidden_sizes)
+        input_size = self.input_size
         for idx, next_dim in enumerate(self.hidden_sizes):
             if self.cond_size is not None:
                 self.cond_layers.append(nn.Linear(self.cond_size, next_dim, bias=self.bias))
@@ -284,5 +287,5 @@ class Denoiser(nn.Module):
         for i in range(len(self.net)):
             X = self.net[i](X)
             if cond is not None:
-                X += self.cond_layers[i](cond)
+                X = X + self.cond_layers[i](cond)
         return X
