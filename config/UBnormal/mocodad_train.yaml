@@ -40,10 +40,11 @@ conditioning_strategy: 'inject' # choices ['inject' (add2layers), 'concat' (cat)
 conditioning_architecture: 'AE' # choices ['AE', 'E', 'E_unet']
 conditioning_indices: [0,1,2] # If conditioning_strategy=random_imp, it must be int and it is used as the number of random indices that will be selected
                               # If an int is given and conditioning_strategy=[inject|concat], n_frames//conditioning_indices will be used as the number of conditioning indices
+                              # If an int is given and conditioning_strategy=inbetween_imp, it will be used as the step of the conditioning indices, starting from 0
                               # If a list is given, it will be used as the conditioning indices 
 h_dim: 32 # dimension of the bottleneck at the end of the encoder of the conditioning network
 latent_dim: 16 # dimension of the latent space of the conditioning encoder
-channels: [32,16,32] # channels for the encoder
+channels: [32,16,32] # channels for the encoder (ignored if conditioning_architecture=E_unet)
 
 ##############################
 

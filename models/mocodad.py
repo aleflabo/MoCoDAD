@@ -24,7 +24,7 @@ class MoCoDAD(pl.LightningModule):
     losses = {'l1':nn.L1Loss, 'smooth_l1':nn.SmoothL1Loss, 'mse':nn.MSELoss}
     conditioning_strategies = {'cat':'concat', 'concat':'concat', 
                                'add2layers':'inject', 'inject':'inject', 
-                               'inbetween_imp':'interleave', 'interleave':'interleave',  
+                               'inbetween_imp':'inbetween_imp', 'interleave':'inbetween_imp',  
                                'random_indices':'random_imp', 'random_imp':'random_imp', 
                                'no_condition':'no_condition', 'none':'no_condition'}
 
@@ -54,8 +54,8 @@ class MoCoDAD(pl.LightningModule):
         self.conditioning_strategy = self.conditioning_strategies[args.conditioning_strategy]
         # Conditioning network
         self.conditioning_indices = args.conditioning_indices
-        self.n_frames_condition, self.n_frames_corrupt = self._set_conditioning_strategy()        
-        self.conditioning_architecture = args.conditioning_architecture
+        self.n_frames_condition, self.n_frames_corrupt, self.input_n_frames = self._set_conditioning_strategy()        
+        self.conditioning_architecture = args.conditioning_architecture if self.conditioning_strategy == 'inject' else None
         self.cond_h_dim = args.h_dim
         self.cond_latent_dim = args.latent_dim
         self.cond_channels = args.channels
@@ -109,19 +109,18 @@ class MoCoDAD(pl.LightningModule):
                                          dropout=self.cond_dropout, n_joints=self.n_joints, 
                                          layer_channels=self.cond_channels, device=self.device)
             elif self.conditioning_architecture == 'E_unet':
-                condition_encoder = STSE_Unet(c_in=self.num_coords, embedding_dim=self.embedding_dim,
+                condition_encoder = STSE_Unet(c_in=self.num_coords, embedding_dim=None,
                                               latent_dim=self.cond_latent_dim, n_frames=self.n_frames_condition,
                                               n_joints=self.n_joints, dropout=self.cond_dropout,
-                                              unet_down_channels=self.cond_channels, device=self.device, set_out_layer=True)
+                                              device=self.device, set_out_layer=True)
             else:
                 raise NotImplementedError(f'Conditioning architecture {self.conditioning_architecture} not implemented.')
         else:
             condition_encoder = None
             
         model = STSAE_Unet(c_in=self.num_coords, embedding_dim=self.embedding_dim, 
-                           n_frames=self.n_frames_corrupt, dropout=self.dropout, 
+                           n_frames=self.input_n_frames, dropout=self.dropout, 
                            n_joints=self.n_joints, device=self.device,
-                           concat_condition=(self.conditioning_strategy == 'concat'), 
                            inject_condition=(self.conditioning_strategy == 'inject'))
         
         self.condition_encoder, self.model = condition_encoder, model
@@ -165,8 +164,10 @@ class MoCoDAD(pl.LightningModule):
                 
                 # Set the time step
                 t = torch.full(size=(B,), fill_value=i, dtype=torch.long, device=self.device)
+                # Prepare the input data for the conditioning strategies 'concat', 'random_imp' and 'inbetween_imp'
+                input_data = self._prepare_input_data(condition_data, x, idxs[1])
                 # Predict the noise
-                predicted_noise = self._unet_forward(x, t=t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
+                predicted_noise = self._unet_forward(input_data, t=t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
                 # Get the alpha and beta values and expand them to the shape of the predicted noise
                 alpha = self._alpha[t][:, None, None, None]
                 alpha_hat = self._alpha_hat[t][:, None, None, None]
@@ -205,9 +206,11 @@ class MoCoDAD(pl.LightningModule):
         condition_data, corrupt_data, idxs = self._select_frames(tensor_data)
         # Encode the condition data
         condition_embedding, rec_cond_data = self._encode_condition(condition_data)
-        # Sample the time steps and currupt the data
+        # Sample the time steps and corrupt the data
         t = self.noise_scheduler.sample_timesteps(corrupt_data.shape[0]).to(self.device)
         x_t, noise = self.noise_scheduler.noise_graph(corrupt_data, t) 
+        # Prepare the input data for the conditioning strategies 'concat', 'random_imp' and 'inbetween_imp'
+        x_t = self._prepare_input_data(condition_data, x_t, idxs[1])
         # Predict the noise
         predicted_noise = self._unet_forward(x_t, t=t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
         # Compute the loss
@@ -507,6 +510,10 @@ class MoCoDAD(pl.LightningModule):
                 mask = strategy(losses[i], loss_of_selected_x)
                 loss_of_selected_x[mask] = losses[i][mask]
                 selected_x[mask] = generated_xs[i][mask]
+        elif 'quantile' in aggr_strategy:
+            q = float(aggr_strategy.split(':')[-1])
+            loss_of_selected_x = torch.quantile(torch.stack(losses), q, dim=0)
+            selected_x = None
         else:
             raise ValueError(f'Unknown aggregation strategy {aggr_strategy}')
         
@@ -526,8 +533,9 @@ class MoCoDAD(pl.LightningModule):
         """
         
         mask = indices < self.conditioning_indices
-        indices_ = indices[mask].reshape(-1, self.conditioning_indices)
-        not_indices = indices[~mask].reshape(-1, self.n_frames-self.conditioning_indices)
+        idxs_sequence = torch.arange(self.n_frames, device=self.device)[None,:].expand(mask.shape[0],-1)
+        indices_ = idxs_sequence[mask].reshape(-1, self.conditioning_indices)
+        not_indices = idxs_sequence[~mask].reshape(-1, self.n_frames-self.conditioning_indices)
         mask = mask[:,None,None,:].expand(-1, self.num_coords, self.n_joints, -1)
         container = x[mask].reshape(-1, self.num_coords, self.n_joints, self.conditioning_indices)
         not_container = x[~mask].reshape(-1, self.num_coords, self.n_joints, self.n_frames-self.conditioning_indices)
@@ -573,6 +581,18 @@ class MoCoDAD(pl.LightningModule):
     
     
     def _load_tensors(self, split_name:str, aggr_strategy:str, n_gen:int) -> Dict[str, torch.Tensor]:
+        """
+        Loads the tensors from the experiment directory.
+
+        Args:
+            split_name (str): name of the split (train, val, test)
+            aggr_strategy (str): aggregation strategy
+            n_gen (int): number of generated samples
+
+        Returns:
+            Dict[str, torch.Tensor]: dictionary containing the tensors. The keys are inferred from the file names.
+        """
+        
         name = 'saved_tensors_{}_{}_{}'.format(split_name, aggr_strategy, n_gen)
         path = os.path.join(self.ckpt_dir, name)
         tensor_files = os.listdir(path)
@@ -631,6 +651,41 @@ class MoCoDAD(pl.LightningModule):
         return self.model.pos_encoding(t, channels)
     
     
+    def _prepare_input_data(self, condition_data:torch.Tensor, corrupt_data:torch.Tensor, corrupt_idxs:torch.Tensor) -> torch.Tensor:
+        """
+        Prepares the input data for the conditioning strategies 'concat', 'random_imp' and 'inbetween_imp'.
+
+        Args:
+            condition_data (torch.Tensor): condition data of shape (B, C, number of conditioning frames, V)
+            corrupt_data (torch.Tensor): corrupt data of shape (B, C, number of corrupt frames, V)
+            corrupt_idxs (torch.Tensor): indexes of the corrupt frames of shape (B, number of corrupt frames) if the conditioning strategy is 'random_imp' 
+                                         or (number of conditioning frames,) if the conditioning strategy is 'inbetween_imp'
+
+        Returns:
+            torch.Tensor: input data
+        """
+        
+        if self.conditioning_strategy == 'concat':
+            x = torch.cat((condition_data, corrupt_data), dim=2)
+        elif self.conditioning_strategy == 'inject':
+            x = corrupt_data
+        elif self.conditioning_strategy in ['random_imp', 'inbetween_imp']:            
+            # indexing is performed on CPU because it fails on GPU 
+            x = torch.empty((corrupt_data.shape[0], self.num_coords, self.n_frames, self.n_joints), dtype=corrupt_data.dtype, device=self.device)
+            corrupt_mask = torch.zeros(x.shape, dtype=bool, device='cpu')
+            if self.conditioning_strategy == 'random_imp':
+                corrupt_idxs = corrupt_idxs.flatten().to('cpu')
+                batch_idxs = torch.arange(corrupt_data.shape[0], device='cpu').repeat_interleave(self.n_frames_corrupt)
+                corrupt_mask[batch_idxs,:,corrupt_idxs,:] = True
+            else:
+                corrupt_mask.index_fill_(2, corrupt_idxs.to('cpu'), True)
+            corrupt_mask = corrupt_mask.to(self.device)
+            x[~corrupt_mask], x[corrupt_mask] = condition_data.flatten(), corrupt_data.flatten()
+        else:
+            x = corrupt_data
+        return x
+    
+    
     def _save_tensors(self, tensors:Dict[str, torch.Tensor], split_name:str, aggr_strategy:str, n_gen:int) -> None:
         """
         Saves the tensors in the experiment directory.
@@ -673,11 +728,11 @@ class MoCoDAD(pl.LightningModule):
             cond_data, cond_idxs = None, None
             corrupt_data, corrupt_idxs = data, torch.arange(self.n_frames, device=self.device)
             
-        elif len(self.conditioning_indices) == 0:
-            if self.conditioning_strategy == 'interleave': 
+        elif isinstance(self.conditioning_indices, int):
+            if self.conditioning_strategy == 'inbetween_imp': 
                 # Take conditioning frames with step equal to `conditioning indices` starting from the first frame
                 cond_idxs = torch.arange(start=0, end=self.n_frames, step=self.conditioning_indices, device=self.device)
-                corrupt_idxs = torch.arange(start=1, end=self.n_frames, step=self.conditioning_indices, device=self.device)
+                corrupt_idxs = torch.tensor([i for i in range(self.n_frames) if i not in cond_idxs], device=self.device)
             else:
                 # Use the integer in `conditioning indices` to split the input sequence in two parts
                 cond_idxs = torch.arange(start=0, end=self.n_frames//self.conditioning_indices, device=self.device)
@@ -706,32 +761,39 @@ class MoCoDAD(pl.LightningModule):
             Tuple[int]: number of conditioning frames, number of non-conditioning frames (input to the model)
         """
         
+        input_n_frames = self.n_frames
+        
         if self.conditioning_strategy == 'no_condition':
             n_frames_cond = 0
             
-        elif self.conditioning_strategy == 'concat' or self.conditioning_strategy == 'inject':
+        elif self.conditioning_strategy == 'random_imp':
+            assert isinstance(self.conditioning_indices, int), \
+                'Random imputation requires an integer number of frames to condition on, not a list of indices'
+            n_frames_cond = self.conditioning_indices
+
+        elif self.conditioning_strategy == 'inbetween_imp':
             if isinstance(self.conditioning_indices, int):
                 n_frames_cond = self.n_frames // self.conditioning_indices
             else:
                 n_frames_cond = len(self.conditioning_indices)
+            
+        elif self.conditioning_strategy in ['concat', 'inject']:
+            if isinstance(self.conditioning_indices, int):
+                n_frames_cond = self.n_frames // self.conditioning_indices
+            else:
                 assert self.conditioning_indices == list(range(min(self.conditioning_indices), max(self.conditioning_indices)+1)), \
                     'Conditioning indices must be a list of consecutive integers'
                 assert (min(self.conditioning_indices) == 0) or (max(self.conditioning_indices) == (self.n_frames-1)), \
                     'Conditioning indices must start from 0 or end at the last frame'
-                    
-        elif self.conditioning_strategy == 'interleave' or self.conditioning_strategy == 'random_imp':
-            if isinstance(self.conditioning_indices, int):
-                n_frames_cond = self.conditioning_indices
-            else:
                 n_frames_cond = len(self.conditioning_indices)
-                assert self.conditioning_strategy != 'random_imp', \
-                    'Random imputation requires an integer number of frames to condition on, not a list of indices'
                     
+            input_n_frames = (self.n_frames - n_frames_cond) if self.conditioning_strategy == 'inject' else input_n_frames
+                                
         else:
             raise NotImplementedError(f'Conditioning strategy {self.conditioning_strategy} not implemented')
         
         n_frames_to_corrupt = self.n_frames - n_frames_cond
-        return n_frames_cond, n_frames_to_corrupt
+        return n_frames_cond, n_frames_to_corrupt, input_n_frames
     
     
     def _set_diffusion_variables(self) -> None:
@@ -746,25 +808,34 @@ class MoCoDAD(pl.LightningModule):
         self._alpha_hat_ = torch.cumprod(self._alpha_, dim=0)
         
         
-    def _unet_forward(self, corrupt_data:torch.Tensor, t:torch.Tensor=None, condition_data:torch.Tensor=None, 
+    def _unet_forward(self, input_data:torch.Tensor, t:torch.Tensor=None, condition_data:torch.Tensor=None, 
                       *, corrupt_idxs:torch.Tensor) -> torch.Tensor:
         """
         Performs a forward pass of the UNet model.
 
         Args:
-            corrupt_data (torch.Tensor): input tensor of shape (batch_size, n_coords, n_joints, n_frames)
-            corrupt_idxs (torch.Tensor): indices of the frames for which the model should predict the noise
+            input_data (torch.Tensor): input tensor of shape (batch_size, n_coords, n_frames, n_joints)
             t (torch.Tensor, optional): encoded time tensor. Defaults to None.
             condition_data (torch.Tensor, optional): conditioning embedding of shape (batch_size, latent_dim). Defaults to None.
+            corrupt_idxs (torch.Tensor): indices of the frames for which the model should predict the noise
 
         Returns:
-            torch.Tensor: predicted noise of shape (batch_size, n_coords, n_joints, n_frames)
+            torch.Tensor: predicted noise of shape (batch_size, n_coords, n_frames, n_joints)
         """
         
-        prediction, _ = self.model(corrupt_data, t, condition_data=condition_data)
+        prediction, _ = self.model(input_data, t, condition_data=condition_data)
         
-        if self.conditioning_strategy != 'inject':
-            prediction = prediction[:, corrupt_idxs]
+        if self.conditioning_strategy not in ['inject', 'no_condition']:
+            # indexing is performed on CPU because it fails on GPU 
+            corrupt_mask = torch.zeros(prediction.shape, dtype=bool, device='cpu')
+            if self.conditioning_strategy == 'random_imp':
+                batch_idxs = torch.arange(prediction.shape[0], device='cpu').repeat_interleave(self.n_frames_corrupt)
+                corrupt_idxs = corrupt_idxs.flatten().to('cpu')
+                corrupt_mask[batch_idxs,:,corrupt_idxs,:] = True
+            else:
+                corrupt_mask.index_fill_(2, corrupt_idxs.to('cpu'), True)
+            corrupt_mask = corrupt_mask.to(self.device)
+            prediction = prediction[corrupt_mask].reshape(-1, self.num_coords, self.n_frames_corrupt, self.n_joints)
         
         return prediction 
     

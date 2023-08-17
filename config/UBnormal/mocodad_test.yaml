@@ -1,18 +1,18 @@
 ### Experiment configuration
 
 ## General settings
-split: 'test' # data split; choices ['train', 'test']
-debug: true # if true, load only a few data samples
+split: 'test' # data split; choices ['train', 'test', 'val']
+debug: false # if true, load only a few data samples
 seed: 999
 validation: false # use validation; only for UBnormal
-use_hr: false # for validation and test on UBnormal
+use_hr: true # for validation and test on UBnormal
 
 ## Computational resources
 accelerator: 'gpu'
 devices: [0,] # indices of cuda devices to use
 
 ## Paths
-dir_name: 'best_experiment' # name of the directory of the current experiment
+dir_name: 'test_experiment' # name of the directory of the current experiment
 data_dir: './data/UBnormal/' # path to the data
 exp_dir: './checkpoints' # path to the directory that will contain the current experiment directory
 test_path: './data/UBnormal/testing/test_frame_mask' # path to the test data
