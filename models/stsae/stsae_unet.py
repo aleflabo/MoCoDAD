@@ -233,10 +233,12 @@ class STSE_Unet(nn.Module):
         """
         
         # Encode the time step
-        t = t.unsqueeze(-1).type(torch.float)
-        t = self.pos_encoding(t, self.embedding_dim)
-    
-        t = t + condition_data
+        if t is not None:
+            t = t.unsqueeze(-1).type(torch.float)
+            t = self.pos_encoding(t, self.embedding_dim)
+
+            if condition_data is not None:
+                t = t + condition_data
         
         fd1, _, _ = self._downscale(X, t)
         
@@ -255,7 +257,7 @@ class STSAE_Unet(STSE_Unet):
                  unet_down_channels:List[int]=[16, 32, 32, 64, 64, 128, 64], 
                  unet_up_channels:List[int]=[64, 32, 32, 2], 
                  dropout:float=0.3, device:Union[str, torch.DeviceObjType]='cpu',
-                 concat_condition:bool=True, inject_condition:bool=False, use_bottleneck:bool=False, *, latent_dim:int=None) -> None:
+                 inject_condition:bool=False, use_bottleneck:bool=False, *, latent_dim:int=None) -> None:
         """
         Class that downscales the input pose sequence along the joints dimension, expands the channels and upscales it back.
         This class inherits from the STSE_Unet class, adding the upscaling logic to the parent class.
@@ -269,7 +271,6 @@ class STSAE_Unet(STSE_Unet):
             unet_up_channels (List[int], optional): _description_. Defaults to [64, 32, 32, 2].
             dropout (float, optional): dropout probability. Defaults to 0.3.
             device (Union[str, torch.DeviceObjType], optional): model device. Defaults to 'cpu'.
-            concat_condition (bool, optional): concatenate the conditioning data to the input sequence. Defaults to True.
             inject_condition (bool, optional): provide the embedding of the conditioning data to the latent layers of the model. Defaults to False.
             use_bottleneck (bool, optional): use a bottleneck layer in the latent space. Defaults to False.
             latent_dim (int, optional): dimension of the latent space. Defaults to 64.
@@ -281,7 +282,6 @@ class STSAE_Unet(STSE_Unet):
         
         # Set the model's main parameters (the other parameters are inherited from the parent class)
         self.unet_up_channels = unet_up_channels
-        self.concat_condition = concat_condition
         self.inject_condition = inject_condition
         self.use_bottleneck = use_bottleneck
         
@@ -424,10 +424,6 @@ class STSAE_Unet(STSE_Unet):
         # Add conditioning signal
         if self.inject_condition:
             t = t + condition_data
-        
-        # Concatenate the conditioning signal
-        elif self.concat_condition:
-            X = torch.cat([condition_data, X], dim=2)
         
         fd1, d1, d2 = self._downscale(X, t)
         

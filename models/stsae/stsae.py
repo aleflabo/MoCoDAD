@@ -104,7 +104,7 @@ class STSE(nn.Module):
             torch.Tensor: latent representation of the input pose sequence of shape (batch_size, latent_dim)
         """
         
-        return self.encode(X, return_shape=False, t=t)
+        return self.encode(X, return_shape=False, t=t), None
     
     
 
