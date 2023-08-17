@@ -29,6 +29,7 @@ class MoCoDADlatent(MoCoDAD):
         
         super().__init__(args)
         
+        assert self.conditioning_strategy == 'inject', 'Conditioning strategy must be inject. Other strategies are not supported for the latent space'
         self.model_return_value = 'pose' if self.stage == 'pretrain' else self.model_return_value
         
         # Load the pretrained model
@@ -158,7 +159,7 @@ class MoCoDADlatent(MoCoDAD):
         if self.stage == 'diffusion':
             # Encode the input
             latent_code = self._unet_forward(corrupt_data, t=constant_t, condition_data=condition_embedding, corrupt_idxs=idxs[1])
-            # Sample the time steps and currupt the data
+            # Sample the time steps and corrupt the data
             t = self.noise_scheduler.sample_timesteps(corrupt_data.shape[0]).to(self.device)
             x_t, latent_noise = self.noise_scheduler.noise_latent(latent_code, t) 
             # Predict the noise

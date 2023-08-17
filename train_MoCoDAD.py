@@ -42,7 +42,7 @@ if __name__== '__main__':
     if (hasattr(args, 'diffusion_on_latent') and args.stage == 'pretrain'):
         monitored_metric = 'pretrain_rec_loss'
         metric_mode = 'min'
-    elif (args.dataset_choice == 'UBnormal' or args.validation):
+    elif args.validation:
         monitored_metric = 'AUC'
         metric_mode = 'max'
     else:

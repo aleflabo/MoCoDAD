@@ -1,24 +1,24 @@
 ### Experiment configuration
 
 ## General settings
-split: 'train' # data split; choices ['train', 'test']
+split: 'test' # data split; choices ['train', 'test']
 debug: false # if true, load only a few data samples
 seed: 999
 validation: false # use validation; only for UBnormal
-use_hr: false # for validation and test on UBnormal
+use_hr: true # for validation and test on UBnormal
 diffusion_on_latent: true # if true, perform diffusion on the latent space
 
 ## Computational resources
 accelerator: 'gpu'
-devices: [0,1] # indices of cuda devices to use
+devices: [0,] # indices of cuda devices to use
 
 ## Paths
-dir_name: 'train_experiment_latent' # name of the directory of the current experiment
+dir_name: 'test_experiment_latent' # name of the directory of the current experiment
 data_dir: './data/UBnormal/' # path to the data
 exp_dir: './checkpoints' # path to the directory that will contain the current experiment directory
-test_path: './data/UBnormal/validating/test_frame_mask' # path to the test data
-load_ckpt: 'best_weigths.ckpt' # name of the checkpoint to load at inference time
-pretrained_model_ckpt_path: './checkpoints/UBnormal/train_experiment_latent/pretrain/best_weigths.ckpt' # path to the pretrained model checkpoint
+test_path: './data/UBnormal/testing/test_frame_mask' # path to the test data
+load_ckpt: 'best_weights.ckpt' # name of the checkpoint to load at inference time
+pretrained_model_ckpt_path: './checkpoints/UBnormal/test_experiment_latent/pretrain/best_weights.ckpt' # path to the pretrained model checkpoint
 create_experiment_dir: false
 
 ## WANDB configuration
@@ -43,6 +43,9 @@ latent_embedding_dim: 64 # dimension of the latent space of the UNet
 conditioning_architecture: 'AE' # choices ['AE', 'E', 'E_unet']
 conditioning_indices: [0,1,2] # If an int is given, n_frames//conditioning_indices will be used as the number of conditioning indices
                               # If a list is given, it will be used as the conditioning indices 
+# If conditioning_strategy=random_imp, it must be int and it is used as the number of random indices that will be selected
+                              # If an int is given and conditioning_strategy=[inject|concat], n_frames//conditioning_indices will be used as the number of conditioning indices
+                              # If a list is given, it will be used as the conditioning indices 
 h_dim: 32 # dimension of the bottleneck at the end of the encoder of the conditioning network
 latent_dim: 16 # dimension of the latent space of the conditioning encoder
 channels: [32,16,32] # channels for the encoder
@@ -56,7 +59,7 @@ hidden_sizes: [64,128,128,64] # hidden sizes of the denoiser network
 ### Training's configuration
 
 ## Diffusion's configuration
-stage: 'pretrain' # choices ['pretrain', 'diffusion']
+stage: 'diffusion' # choices ['pretrain', 'diffusion']
 noise_steps: 10 # how many diffusion steps to perform
 
 ### Optimizer and scheduler's configuration
@@ -71,7 +74,7 @@ rec_weight: 0.01 # weight of the reconstruction loss
 
 
 ### Inference's configuration
-n_generated_samples: 5 # number of samples to generate
+n_generated_samples: 10 # number of samples to generate
 model_return_value: 'loss' # choices ['loss', 'poses', 'all']; if 'loss', the model will return the loss; 
                            # if 'poses', the model will return the generated poses; 
                            # if 'all', the model will return both the loss and the generated poses
@@ -85,7 +88,7 @@ aggregation_strategy: 'best' # choices ['best', 'mean', 'median', 'random']; if 
 filter_kernel_size: 30 # size of the kernel to use for smoothing the anomaly score of each clip
 frames_shift: 18 # it compensates the shift of the anomaly score due to the sliding window; 
                  # in conjuction with pad_size and filter_kernel_size, it strongly depends on the dataset
-save_tensors: false # if true, save the generated tensors for faster inference
+save_tensors: true # if true, save the generated tensors for faster inference
 load_tensors: false # if true, load the generated tensors for faster inference
 
 ##############################
