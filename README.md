@@ -66,7 +66,7 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 
 ## Setup
 ### Environment
-```
+```sh
 conda env create -f environment.yaml
 conda activate mocodad
 ```
@@ -74,7 +74,7 @@ conda activate mocodad
 ### Datasets
 You can download the extracted poses from the [GDRive](https://drive.google.com/drive/folders/1fWT1rJ0rEJJQd4NJQ5v6mGm89kcPP_WQ?usp=sharing).
 
-Place the extracted folder in a "./data" folder and change the configs accordingly.
+Place the extracted folder in a `./data` folder and change the configs accordingly.
 
 ### **Training** 
 
@@ -95,14 +95,14 @@ In each config file you can choose the conditioning strategy and change the diff
 Update the args 'data_dir', 'test_path', 'dataset_path_to_robust' with the path where you stored the datasets.  To better track your experiments, change 'dir_name' and the wandb parameters.
 
 To train MoCoDAD:
-```
+```sh
 python train_MoCoDAD.py --config config/[Avenue/UBnormal/STC]/{config_name}.yaml
 ```
 
 
 ### Once trained, you can run the **Evaluation**
 
-The training config is saved the associated experiment directory (/args.exp_dir/args.dataset_choice/args.dir_name). 
+The training config is saved the associated experiment directory (`/args.exp_dir/args.dataset_choice/args.dir_name`). 
 In order to evaluate the model on the test set, you need to change the following parameters in the config:
 
 - split: 'Test'
@@ -110,7 +110,7 @@ In order to evaluate the model on the test set, you need to change the following
 - load_ckpt: 'path_to_the_saved_ckpt'
 
 Test MoCoDAD
-```
+```sh
 python eval_MoCoDAD.py --config /args.exp_dir/args.dataset_choice/args.dir_name/config.yaml
 ```
 additional flag you can use:
