@@ -76,9 +76,10 @@ conda activate mocodad
 ```
 
 ### Datasets
-You can download the extracted poses from the [GDRive](https://drive.google.com/drive/folders/1fWT1rJ0rEJJQd4NJQ5v6mGm89kcPP_WQ?usp=sharing).
+You can download the extracted poses for the datasets HR-Avenue, HR-ShanghaiTech and HR-UBnormal from the [GDRive](https://drive.google.com/drive/folders/1aUDiyi2FCc6nKTNuhMvpGG_zLZzMMc83?usp=drive_link).
 
 Place the extracted folder in a `./data` folder and change the configs accordingly.
+
 
 ### **Training** 
 
@@ -120,4 +121,15 @@ python eval_MoCoDAD.py --config /args.exp_dir/args.dataset_choice/args.dir_name/
 additional flag you can use:
 - use_hr: False -> just for test. Use the entire version of the dataset or the Human-Related one.
 
+### **Pretrained Models**
 
+The checkpoints for the pretrained models on the three datasets can be found [HERE](https://drive.google.com/drive/folders/1KoxjwArqcIGQVBsxrlHcNJw9wtwJ7jQx?usp=drive_link).
+To evaluate them follow the following steps:
+1. Download the checkpoints
+2. Add them to the corresponding folder `/checkpoints/[Avenue/UBnormal/STC]/pretrained_model`
+3. Copy the config file /config/[Avenue/UBnormal/STC]/mocodad_test.yaml in the correct checkpoint folder
+4. Update the 'load_ckpt' field with the downloaded ckpt
+5. run 
+    ```sh
+    python eval_MoCoDAD.py --config `/checkpoints/[Avenue/UBnormal/STC]/pretrained_model/mocodad_test.yaml]
+    ```
