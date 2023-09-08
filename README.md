@@ -108,11 +108,11 @@ python train_MoCoDAD.py --config config/[Avenue/UBnormal/STC]/{config_name}.yaml
 ### Once trained, you can run the **Evaluation**
 
 The training config is saved the associated experiment directory (`/args.exp_dir/args.dataset_choice/args.dir_name`). 
-In order to evaluate the model on the test set, you need to change the following parameters in the config:
+To evaluate the model on the test set, you need to change the following parameters in the config:
 
 - split: 'Test'
 - validation: 'False'
-- load_ckpt: 'path_to_the_saved_ckpt'
+- load_ckpt: 'name_of_ckpt'
 
 Test MoCoDAD
 ```sh
