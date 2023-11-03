@@ -31,6 +31,7 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 │   │   ├── mocodad_test.yaml
 │   │   └── mocodad_train.yaml
 │   └── UBnormal
+|       ├── mocodad-latent_train.yaml
 │       ├── mocodad-latent_train.yaml
 │       ├── mocodad_test.yaml
 │       └── mocodad_train.yaml
@@ -46,6 +47,7 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 │   └── stsae
 │       ├── stsae.py
 │       └── stsae_unet.py
+├── predict_MoCoDAD.py
 ├── README.md
 ├── train_MoCoDAD.py
 └── utils
