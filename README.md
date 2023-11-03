@@ -47,10 +47,6 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 │       ├── stsae.py
 │       └── stsae_unet.py
 ├── README.md
-├── scripts
-│   ├── count_anomalies.py
-│   ├── to_morais_format.py
-│   └── visualization.py
 ├── train_MoCoDAD.py
 └── utils
     ├── argparser.py
