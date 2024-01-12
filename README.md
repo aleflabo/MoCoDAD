@@ -16,7 +16,13 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 
 <!-- Visit our [**webpage**](https://www.pinlab.org/coskad) for more details. -->
 
-![teaser](assets/mocodad.jpg) 
+
+<div align="center">
+<a href="https://www.youtube.com/watch?v=IuDzVez--9U">
+  <img src="https://markdown-videos-api.jorgenkh.no/url?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DIuDzVez--9U" alt="mocodad" title="mocodad"  width="560" height="315"/>
+</a>
+</div>
+
 
 ## Content
 ```
@@ -65,6 +71,7 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
     └── tools.py
     
 ```
+![teaser](assets/mocodad.jpg) 
 
 ## Setup
 ### Environment
