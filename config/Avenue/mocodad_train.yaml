@@ -4,12 +4,12 @@
 split: 'train' # data split; choices ['train', 'test']
 debug: false # if true, load only a few data samples
 seed: 999
-validation: false # use validation; only for UBnormal
+validation: true # use validation; only for UBnormal
 use_hr: false # for validation and test on UBnormal
 
 ## Computational resources
 accelerator: 'gpu'
-devices: [0,1] # indices of cuda devices to use
+devices: [0,] # indices of cuda devices to use
 
 ## Paths
 dir_name: 'train_experiment' # name of the directory of the current experiment
@@ -92,7 +92,7 @@ dataset_choice: 'HR-Avenue'
 seg_len: 6 # length of the window (cond+noised) 
 vid_res: [640,360]
 batch_size: 1024
-pad_size: 12 # size of the padding 
+pad_size: 10 # size of the padding 
 
 ## Other parameters
 headless: false # remove the keypoints of the head

@@ -13,11 +13,8 @@ def init_args(args):
             'test' : os.path.join(args.data_dir, 'pose', 'testing/tracked_person/'),
             'validation': os.path.join(args.data_dir, 'pose', 'validating/tracked_person/')}
         if args.validation:
-            if args.dataset_choice == 'UBnormal':
-                args.pose_path['validation'] = os.path.join(args.data_dir, 'pose', 'validating/tracked_person/')
-                args.gt_path = os.path.join(args.data_dir, 'validating', 'test_frame_mask')
-            else:
-                raise ValueError('Validation is not available for this dataset: {}'.format(args.dataset_choice))
+            args.pose_path['validation'] = os.path.join(args.data_dir, 'pose', 'validating/tracked_person/')
+            args.gt_path = os.path.join(args.data_dir, 'validating', 'test_frame_mask')
             
     elif args.dataset_choice == 'Avenue':
         args.pose_path = {

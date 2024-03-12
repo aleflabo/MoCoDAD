@@ -119,6 +119,10 @@ def data_of_combined_model(**args):
             _, local_scaler = scale_trajectories(aggregate_autoencoder_data(local_trajectories),
                                                 strategy=local_normalisation_strategy)
             save_scaler(local_scaler, scaler_path)
+        elif split == 'validation' and 'UBnormal' not in trajectories_path:
+            _, local_scaler = scale_trajectories(aggregate_autoencoder_data(local_trajectories),
+                                                strategy=local_normalisation_strategy)
+            save_scaler(local_scaler, scaler_path.removesuffix('.pickle') + '_val.pickle') 
         else:
             local_scaler = load_scaler(scaler_path)
 
