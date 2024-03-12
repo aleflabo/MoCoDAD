@@ -1,5 +1,9 @@
 # Multimodal Motion Conditioned Diffusion Model for Skeleton-based Video Anomaly Detection
-_Alessandro Flaborea, Luca Collorone, Guido D'Amely, Stefano D'Arrigo, Bardh Prenkaj, Fabio Galasso_
+_Alessandro Flaborea*, Luca Collorone*, Guido D'Amely*, Stefano D'Arrigo*, Bardh Prenkaj, Fabio Galasso_
+
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/multimodal-motion-conditioned-diffusion-model/video-anomaly-detection-on-hr-avenue)](https://paperswithcode.com/sota/video-anomaly-detection-on-hr-avenue?p=multimodal-motion-conditioned-diffusion-model)
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/multimodal-motion-conditioned-diffusion-model/video-anomaly-detection-on-hr-shanghaitech)](https://paperswithcode.com/sota/video-anomaly-detection-on-hr-shanghaitech?p=multimodal-motion-conditioned-diffusion-model)
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/multimodal-motion-conditioned-diffusion-model/video-anomaly-detection-on-hr-ubnormal)](https://paperswithcode.com/sota/video-anomaly-detection-on-hr-ubnormal?p=multimodal-motion-conditioned-diffusion-model)
 
 <p align="center">
     <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/pytorch-lightning-blue.svg?logo=PyTorch%20Lightning"></a>
@@ -8,11 +12,17 @@ _Alessandro Flaborea, Luca Collorone, Guido D'Amely, Stefano D'Arrigo, Bardh Pre
 </p>
 
 
-The official PyTorch implementation of the IEEE/CVF International Conference on Computer Vision (ICCV) '23 paper [**Multimodal Motion Conditioned Diffusion Model for Skeleton-based Video Anomaly Detection**](https://arxiv.org/abs/2307.07205).
+The official PyTorch implementation of the IEEE/CVF International Conference on Computer Vision (ICCV) '23 paper [**Multimodal Motion Conditioned Diffusion Model for Skeleton-based Video Anomaly Detection**](https://openaccess.thecvf.com/content/ICCV2023/html/Flaborea_Multimodal_Motion_Conditioned_Diffusion_Model_for_Skeleton-based_Video_Anomaly_Detection_ICCV_2023_paper.html).
 
 <!-- Visit our [**webpage**](https://www.pinlab.org/coskad) for more details. -->
 
-![teaser](assets/mocodad.jpg) 
+
+<div align="center">
+<a href="https://www.youtube.com/watch?v=IuDzVez--9U">
+  <img src="https://markdown-videos-api.jorgenkh.no/url?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DIuDzVez--9U" alt="mocodad" title="mocodad"  width="560" height="315"/>
+</a>
+</div>
+
 
 ## Content
 ```
@@ -27,6 +37,7 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 │   │   ├── mocodad_test.yaml
 │   │   └── mocodad_train.yaml
 │   └── UBnormal
+|       ├── mocodad-latent_train.yaml
 │       ├── mocodad-latent_train.yaml
 │       ├── mocodad_test.yaml
 │       └── mocodad_train.yaml
@@ -42,11 +53,8 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 │   └── stsae
 │       ├── stsae.py
 │       └── stsae_unet.py
+├── predict_MoCoDAD.py
 ├── README.md
-├── scripts
-│   ├── count_anomalies.py
-│   ├── to_morais_format.py
-│   └── visualization.py
 ├── train_MoCoDAD.py
 └── utils
     ├── argparser.py
@@ -63,6 +71,7 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
     └── tools.py
     
 ```
+![teaser](assets/mocodad.jpg) 
 
 ## Setup
 ### Environment
@@ -72,9 +81,10 @@ conda activate mocodad
 ```
 
 ### Datasets
-You can download the extracted poses from the [GDRive](https://drive.google.com/drive/folders/1fWT1rJ0rEJJQd4NJQ5v6mGm89kcPP_WQ?usp=sharing).
+You can download the extracted poses for the datasets HR-Avenue, HR-ShanghaiTech and HR-UBnormal from the [GDRive](https://drive.google.com/drive/folders/1aUDiyi2FCc6nKTNuhMvpGG_zLZzMMc83?usp=drive_link).
 
 Place the extracted folder in a `./data` folder and change the configs accordingly.
+
 
 ### **Training** 
 
@@ -103,11 +113,11 @@ python train_MoCoDAD.py --config config/[Avenue/UBnormal/STC]/{config_name}.yaml
 ### Once trained, you can run the **Evaluation**
 
 The training config is saved the associated experiment directory (`/args.exp_dir/args.dataset_choice/args.dir_name`). 
-In order to evaluate the model on the test set, you need to change the following parameters in the config:
+To evaluate the model on the test set, you need to change the following parameters in the config:
 
 - split: 'Test'
 - validation: 'False'
-- load_ckpt: 'path_to_the_saved_ckpt'
+- load_ckpt: 'name_of_ckpt'
 
 Test MoCoDAD
 ```sh
@@ -116,4 +126,27 @@ python eval_MoCoDAD.py --config /args.exp_dir/args.dataset_choice/args.dir_name/
 additional flag you can use:
 - use_hr: False -> just for test. Use the entire version of the dataset or the Human-Related one.
 
+### **Pretrained Models**
 
+The checkpoints for the pretrained models on the three datasets can be found [HERE](https://drive.google.com/drive/folders/1KoxjwArqcIGQVBsxrlHcNJw9wtwJ7jQx?usp=drive_link).
+To evaluate them follow the following steps:
+1. Download the checkpoints
+2. Add them to the corresponding folder `/checkpoints/[Avenue/UBnormal/STC]/pretrained_model`
+3. Copy the config file /config/[Avenue/UBnormal/STC]/mocodad_test.yaml in the correct checkpoint folder
+4. Update the 'load_ckpt' field with the downloaded ckpt
+5. run 
+    ```sh
+    python eval_MoCoDAD.py --config `/checkpoints/[Avenue/UBnormal/STC]/pretrained_model/mocodad_test.yaml]
+    ```
+
+## Citation
+```
+@InProceedings{Flaborea_2023_ICCV,
+    author    = {Flaborea, Alessandro and Collorone, Luca and di Melendugno, Guido Maria D'Amely and D'Arrigo, Stefano and Prenkaj, Bardh and Galasso, Fabio},
+    title     = {Multimodal Motion Conditioned Diffusion Model for Skeleton-based Video Anomaly Detection},
+    booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
+    month     = {October},
+    year      = {2023},
+    pages     = {10318-10329}
+}
+```
