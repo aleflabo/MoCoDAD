@@ -85,6 +85,56 @@ You can download the extracted poses for the datasets HR-Avenue, HR-ShanghaiTech
 
 Place the extracted folder in a `./data` folder and change the configs accordingly.
 
+#### Custom Datasets preparation
+To adapt your custom dataset to work with MoCoDAD, you can follow the structure below or look at the UBnormal dataset description [here](https://drive.google.com/drive/u/1/folders/1h-dBNkAZdmgtlRd-TB8ScyHLshogTrLb).
+
+```
+{your_custom_dataset}
+|
+|__________ training
+|           |
+|           |__________ trajectories
+|                       |
+|                       |_________{scene_id}_{clip_id}
+|                                 |
+|                                 |_________00001.csv
+|                                 |_________...
+|                                 |_________0000{n}.csv
+|
+|__________ testing
+|           |
+|           |__________ trajectories
+|           |           |
+|           |           |_________{scene_id}_{clip_id}
+|           |                     |
+|           |                     |_________00001.csv
+|           |                     |_________...
+|           |                     |_________0000{n}.csv
+|           |
+|           |__________ test_frame_mask
+|                       |
+|                       |_______________{scene_id}_{clip_id}.npy
+|                       |_______________...
+|                       |_______________{scene_id}_{clip_id}.npy
+|
+|__________ validating
+            |
+            |__________ trajectories
+            |           |
+            |           |_________{scene_id}_{clip_id}
+            |                     |
+            |                     |_________00001.csv
+            |                     |_________...
+            |                     |_________0000{n}.csv
+            |
+            |__________ test_frame_mask
+                        |
+                        |_______________{scene_id}_{clip_id}.npy
+                        |_______________...
+                        |_______________{scene_id}_{clip_id}.npy
+```
+
+
 
 ### **Training** 
 
