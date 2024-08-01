@@ -138,6 +138,10 @@ To evaluate them follow the following steps:
     ```sh
     python eval_MoCoDAD.py --config `/checkpoints/[Avenue/UBnormal/STC]/pretrained_model/mocodad_test.yaml]
     ```
+### Visualization
+
+We provide the code to visualize frames, poses and anomaly scores. Follow the instruction in [visualize](/visualize) for further details.
+
 
 ## Citation
 ```
