@@ -24,7 +24,6 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 </div>
 
 
-![teaser](assets/mocodad.jpg) 
 
 ## Setup
 ### Environment
@@ -32,6 +31,7 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 conda env create -f environment.yaml
 conda activate mocodad
 ```
+![teaser](assets/mocodad.jpg) 
 
 ### Datasets
 You can download the extracted poses for the datasets HR-Avenue, HR-ShanghaiTech and HR-UBnormal from the [GDRive](https://drive.google.com/drive/folders/1aUDiyi2FCc6nKTNuhMvpGG_zLZzMMc83?usp=drive_link).
