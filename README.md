@@ -41,7 +41,51 @@ Place the extracted folder in a `./data` folder and change the configs according
 #### Custom Datasets preparation
 To adapt your custom dataset to work with MoCoDAD, you can follow the structure below or look at the UBnormal dataset description [here](https://drive.google.com/drive/u/1/folders/1h-dBNkAZdmgtlRd-TB8ScyHLshogTrLb).
 We also provide the code to extract poses and track actors in videos in the [`_annotations`](/_annotations) folder. 
-
+```
+{your_custom_dataset}
+|
+|__________ training
+|           |
+|           |__________ trajectories
+|                       |
+|                       |_________{scene_id}_{clip_id}
+|                                 |
+|                                 |_________00001.csv
+|                                 |_________...
+|                                 |_________0000{n}.csv
+|
+|__________ testing
+|           |
+|           |__________ trajectories
+|           |           |
+|           |           |_________{scene_id}_{clip_id}
+|           |                     |
+|           |                     |_________00001.csv
+|           |                     |_________...
+|           |                     |_________0000{n}.csv
+|           |
+|           |__________ test_frame_mask
+|                       |
+|                       |_______________{scene_id}_{clip_id}.npy
+|                       |_______________...
+|                       |_______________{scene_id}_{clip_id}.npy
+|
+|__________ validating
+            |
+            |__________ trajectories
+            |           |
+            |           |_________{scene_id}_{clip_id}
+            |                     |
+            |                     |_________00001.csv
+            |                     |_________...
+            |                     |_________0000{n}.csv
+            |
+            |__________ test_frame_mask
+                        |
+                        |_______________{scene_id}_{clip_id}.npy
+                        |_______________...
+                        |_______________{scene_id}_{clip_id}.npy
+```
 ### **Training** 
 
 To train MoCoDAD, you can select the different type of conditioning of the model. The default parameters achieve the best results reported in the paper 
