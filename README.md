@@ -24,53 +24,6 @@ The official PyTorch implementation of the IEEE/CVF International Conference on 
 </div>
 
 
-## Content
-```
-.
-├── assets
-│   ├── mocodad.jpg
-├── config
-│   ├── Avenue
-│   │   ├── mocodad_test.yaml
-│   │   └── mocodad_train.yaml
-│   ├── STC
-│   │   ├── mocodad_test.yaml
-│   │   └── mocodad_train.yaml
-│   └── UBnormal
-|       ├── mocodad-latent_train.yaml
-│       ├── mocodad-latent_train.yaml
-│       ├── mocodad_test.yaml
-│       └── mocodad_train.yaml
-├── environment.yaml
-├── eval_MoCoDAD.py
-├── models
-│   ├── common
-│   │   └── components.py
-│   ├── gcae
-│   │   └── stsgcn.py
-│   ├── mocodad_latent.py
-│   ├── mocodad.py
-│   └── stsae
-│       ├── stsae.py
-│       └── stsae_unet.py
-├── predict_MoCoDAD.py
-├── README.md
-├── train_MoCoDAD.py
-└── utils
-    ├── argparser.py
-    ├── data.py
-    ├── dataset.py
-    ├── dataset_utils.py
-    ├── diffusion_utils.py
-    ├── ema.py
-    ├── eval_utils.py
-    ├── get_robust_data.py
-    ├── __init__.py
-    ├── model_utils.py
-    ├── preprocessing.py
-    └── tools.py
-    
-```
 ![teaser](assets/mocodad.jpg) 
 
 ## Setup
