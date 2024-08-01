@@ -87,7 +87,7 @@ Place the extracted folder in a `./data` folder and change the configs according
 
 #### Custom Datasets preparation
 To adapt your custom dataset to work with MoCoDAD, you can follow the structure below or look at the UBnormal dataset description [here](https://drive.google.com/drive/u/1/folders/1h-dBNkAZdmgtlRd-TB8ScyHLshogTrLb).
-We also provide the code to extract poses and track actors in the scene in the `_annotations` folder. 
+We also provide the code to extract poses and track actors in videos in the [`_annotations`](/_annotations) folder. 
 ```
 {your_custom_dataset}
 |
